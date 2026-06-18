@@ -1,26 +1,37 @@
 /* ============================================================
-   Root App — onenight dress rental marketplace (Hebrew RTL)
-   Luxury redesign · Tailwind components
+   Root App — onenight dress rental marketplace (Hebrew RTL).
+   Owns routing + shared state; delegates rendering to pages.
    ============================================================ */
 import { useState, useEffect, useMemo } from "react";
-import { LS } from "./data.js";
-import { api } from "./api.js";
-import {
-  SiteHeader,
-  Hero,
-  FilterSidebar,
-  ProductGrid,
-  DetailModal,
-  EMPTY_FILTERS,
-} from "./components.jsx";
-import { PublishPage, ThankYou, AuthPage, AccountPage, AdminPage } from "./pages.jsx";
+import { api } from "./lib/api.js";
+import { useLocalStorage } from "./hooks/useLocalStorage.js";
+import { useToast } from "./hooks/useToast.js";
+import { EMPTY_FILTERS } from "./components/filters/filterConstants.js";
+import { SiteHeader } from "./components/layout/SiteHeader.jsx";
+import { Footer } from "./components/layout/Footer.jsx";
+import { Toast } from "./components/ui/Toast.jsx";
+import { DetailModal } from "./components/product/DetailModal.jsx";
+import HomePage from "./pages/HomePage.jsx";
+import FavoritesPage from "./pages/FavoritesPage.jsx";
+import PublishPage from "./pages/PublishPage.jsx";
+import ThankYou from "./pages/ThankYou.jsx";
+import AuthPage from "./pages/AuthPage.jsx";
+import AccountPage from "./pages/AccountPage.jsx";
+import AdminPage from "./pages/AdminPage.jsx";
+
+const routeFromHash = () => (location.hash.replace("#", "") === "admin" ? "admin" : "home");
 
 export default function App() {
-  const [route, setRoute] = useState(() =>
-    location.hash.replace("#", "") === "admin" ? "admin" : "home"
-  );
+  const [route, setRoute] = useState(routeFromHash);
   const [dresses, setDresses] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useLocalStorage("onenight_user", null);
+  const [favIds, setFavIds] = useLocalStorage("onenight_favs", []);
+  const [selected, setSelected] = useState(null);
+  const [authMode, setAuthMode] = useState("login");
+  const [filters, setFilters] = useState({ ...EMPTY_FILTERS });
+  const [toastMsg, toast] = useToast();
+
   const reloadDresses = async () => {
     try {
       const data = await api("/api/dresses?status=all");
@@ -31,27 +42,14 @@ export default function App() {
       setLoading(false);
     }
   };
-  const [user, setUser] = useState(() => LS.get("onenight_user", null));
-  const [favIds, setFavIds] = useState(() => LS.get("onenight_favs", []));
-  const [selected, setSelected] = useState(null);
-  const [toastMsg, setToastMsg] = useState(null);
-  const [authMode, setAuthMode] = useState("login");
-  const [f, setF] = useState({ ...EMPTY_FILTERS });
 
   useEffect(() => { reloadDresses(); }, []);
-  useEffect(() => LS.set("onenight_favs", favIds), [favIds]);
-  useEffect(() => LS.set("onenight_user", user), [user]);
   useEffect(() => {
-    const h = () => { if (location.hash.replace("#", "") === "admin") setRoute("admin"); };
+    const h = () => { if (routeFromHash() === "admin") setRoute("admin"); };
     window.addEventListener("hashchange", h);
     return () => window.removeEventListener("hashchange", h);
   }, []);
 
-  const toast = (m) => {
-    setToastMsg(m);
-    clearTimeout(window.__t);
-    window.__t = setTimeout(() => setToastMsg(null), 2600);
-  };
   const dressById = (id) => dresses.find((d) => d.id === id);
   const toggleFav = (id) =>
     setFavIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
@@ -79,21 +77,21 @@ export default function App() {
     return dresses
       .filter((d) => d.status === "approved")
       .filter((d) => {
-        if (f.q) {
-          const q = f.q.toLowerCase();
+        if (filters.q) {
+          const q = filters.q.toLowerCase();
           const hay = (d.title + d.desc + d.color + d.region).toLowerCase();
           if (!hay.includes(q)) return false;
         }
-        if (f.color && !d.color.includes(f.color.trim())) return false;
-        if (d.price > f.maxPrice) return false;
-        if (d.price < f.minPrice) return false;
-        if (f.regions.length && !f.regions.includes(d.region)) return false;
-        if (f.sizes.length && !f.sizes.includes(d.size)) return false;
-        if (f.conditions.length && !f.conditions.includes(d.condition)) return false;
-        if (f.source !== "all" && d.source !== f.source) return false;
+        if (filters.color && !d.color.includes(filters.color.trim())) return false;
+        if (d.price > filters.maxPrice) return false;
+        if (d.price < filters.minPrice) return false;
+        if (filters.regions.length && !filters.regions.includes(d.region)) return false;
+        if (filters.sizes.length && !filters.sizes.includes(d.size)) return false;
+        if (filters.conditions.length && !filters.conditions.includes(d.condition)) return false;
+        if (filters.source !== "all" && d.source !== filters.source) return false;
         return true;
       });
-  }, [dresses, f]);
+  }, [dresses, filters]);
 
   const favDresses = favIds.map(dressById).filter(Boolean);
 
@@ -108,68 +106,27 @@ export default function App() {
         onLogout={logout}
       />
 
+      {/* Navbar is fixed; home hero sits behind it, other routes need top clearance */}
+      {route !== "home" && <div aria-hidden className="h-[72px]" />}
+
       {route === "home" && (
-        <>
-          <Hero
-            onPublish={() => go("publish")}
-            onBrowse={() =>
-              document.getElementById("browse")?.scrollIntoView({ behavior: "smooth" })
-            }
-          />
-
-          <section id="browse" className="mx-auto max-w-[1280px] px-6 pb-28 pt-14 lg:px-10">
-            <div className="flex gap-10">
-              <FilterSidebar f={f} setF={setF} resultCount={visible.length} />
-
-              <div className="min-w-0 flex-1">
-                {loading ? (
-                  <div className="flex min-h-[40vh] items-center justify-center font-display text-2xl text-muted">
-                    טוען שמלות…
-                  </div>
-                ) : (
-                  <ProductGrid
-                    dresses={visible}
-                    favIds={favIds}
-                    onFav={toggleFav}
-                    onOpen={setSelected}
-                    emptyAction={() => go("publish")}
-                  />
-                )}
-              </div>
-            </div>
-          </section>
-        </>
+        <HomePage
+          go={go}
+          filters={filters}
+          setFilters={setFilters}
+          loading={loading}
+          dresses={visible}
+          favIds={favIds}
+          onFav={toggleFav}
+          onOpen={setSelected}
+        />
       )}
 
       {route === "publish" && <PublishPage onSubmit={publish} goHome={() => go("home")} />}
       {route === "thankyou" && <ThankYou goHome={() => go("home")} />}
 
       {route === "favorites" && (
-        <div className="mx-auto max-w-[1280px] px-6 pb-28 pt-12 lg:px-10">
-          <h2 className="mb-8 font-display text-4xl text-ink">המועדפים שלי</h2>
-          {favDresses.length ? (
-            <ProductGrid
-              dresses={favDresses}
-              favIds={favIds}
-              onFav={toggleFav}
-              onOpen={setSelected}
-            />
-          ) : (
-            <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 rounded-sm border border-dashed border-line py-16 text-center">
-              <p className="font-display text-2xl text-ink">עדיין לא שמרת שמלות</p>
-              <p className="max-w-xs text-sm text-muted">
-                לחצי על הלב בשמלות שאהבת והן יופיעו כאן.
-              </p>
-              <button
-                type="button"
-                onClick={() => go("home")}
-                className="mt-1 rounded-sm bg-brand px-7 py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-white hover:bg-brand-dark"
-              >
-                גלי שמלות
-              </button>
-            </div>
-          )}
-        </div>
+        <FavoritesPage dresses={favDresses} favIds={favIds} onFav={toggleFav} onOpen={setSelected} go={go} />
       )}
 
       {route === "login" && (
@@ -190,7 +147,7 @@ export default function App() {
         />
       )}
       {route === "account" && !user && (
-        <div className="container page" style={{ paddingTop: 50 }}>
+        <div className="container page pt-[50px]">
           <div className="empty">נא להתחבר תחילה.</div>
         </div>
       )}
@@ -207,48 +164,9 @@ export default function App() {
         />
       )}
 
-      <footer className="footer">
-        <div className="footer-inner">
-          <div>
-            <h4>onenight</h4>
-            <p style={{ margin: 0 }}>
-              השכרת שמלות ערב · קהילה של נשים<br />
-              שמלה אחת, ערב אחד, זיכרון לכל החיים.
-            </p>
-          </div>
-          <div>
-            <h4>ניווט</h4>
-            <p style={{ margin: 0, lineHeight: 2 }}>
-              <a onClick={() => go("home")}>בית</a><br />
-              <a onClick={() => go("publish")}>פרסום שמלה</a><br />
-              <a onClick={() => go("favorites")}>מועדפים</a>
-            </p>
-          </div>
-          <div>
-            <h4>יצירת קשר</h4>
-            <p style={{ margin: 0, lineHeight: 2 }}>
-              מייל: hello@onenight.co.il<br />
-              וואטסאפ: 03-0000000<br />
-              <a onClick={() => toast("תקנון האתר")}>תקנון ותנאי שימוש</a>
-            </p>
-          </div>
-        </div>
-        <div
-          style={{
-            textAlign: "center",
-            marginTop: 32,
-            paddingTop: 24,
-            borderTop: "1px solid var(--border)",
-            fontSize: 10,
-            letterSpacing: "0.08em",
-            color: "var(--muted)",
-          }}
-        >
-          © {new Date().getFullYear()} onenight · כל הזכויות שמורות
-        </div>
-      </footer>
+      <Footer go={go} toast={toast} />
 
-      {toastMsg && <div className="toast">{toastMsg}</div>}
+      <Toast message={toastMsg} />
     </div>
   );
 }

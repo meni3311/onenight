@@ -5,7 +5,7 @@
 /* ---------- Tokens ---------- */
 :root {
   /* ── onenight luxury token system (wine-red signature) ── */
-  --canvas:     #F7F5F0;
+  --canvas:     rgba(110,44,44,0.08);
   --ink:        #1A1714;
   --brand:      #8B3A3A;
   --brand-dark: #6E2C2C;
@@ -13,7 +13,7 @@
   --success:    #4A7C59;
 
   /* legacy aliases remapped onto the new palette so existing pages stay on-brand */
-  --bg:         #F7F5F0;
+  --bg:         rgba(110,44,44,0.08);
   --surface:    #FFFFFF;
   --surface-2:  #F1EEE8;
   --border:     #E8E4DE;
@@ -554,8 +554,8 @@ input[type=range] { accent-color: var(--rose); }
 .card-price {
   font-family: 'Frank Ruhl Libre', serif;
   font-size: 18px;
-  font-weight: 400;
-  color: var(--text);
+  font-weight: 600;
+  color: #2A1F1F;
   margin-top: 6px;
 }
 .card-price span { font-family: 'Assistant', sans-serif; font-size: 11px; color: var(--muted); }
@@ -909,12 +909,12 @@ input[type=range] { accent-color: var(--rose); }
 
 /* ---------- Footer ---------- */
 .footer {
-  border-top: 1px solid rgba(139,58,58,0.14);
+  border-top: 1px solid rgba(139,58,58,0.12);
   margin-top: 60px;
   padding: 56px 40px 40px;
   background: rgba(110,44,44,0.08);
-  backdrop-filter: blur(12px) saturate(1.4);
-  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
 }
 .footer-inner {
   max-width: 1280px;
@@ -1092,7 +1092,7 @@ input[type=range] { accent-color: var(--rose); }
 .lux-scroll::-webkit-scrollbar-thumb:hover { background: #8B3A3A; }
 .lux-scroll { scrollbar-width: thin; scrollbar-color: #DAD4CC transparent; }
 
-/* Card scroll-reveal is now handled by framer-motion in ProductGrid (components.jsx). */
+/* Card scroll-reveal is now handled by framer-motion in components/gallery/ProductGrid.jsx. */
 @media (prefers-reduced-motion: reduce) {
   /* framer-motion respects this automatically via useReducedMotion in newer versions;
      this is a belt-and-braces guard for any residual transforms. */
