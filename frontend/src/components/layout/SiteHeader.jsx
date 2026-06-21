@@ -1,45 +1,42 @@
 import { useState } from "react";
-import { Logo } from "./Logo.jsx";
 import { Icon } from "../ui/Icon.jsx";
 import { useScrolled } from "../../hooks/useScrolled.js";
 import { useBodyScrollLock } from "../../hooks/useBodyScrollLock.js";
+import { useAuth } from "../../context/AuthContext.jsx";
 
-/* Sticky navigation: blur-on-scroll, RTL, with a full-screen mobile menu. */
-export function SiteHeader({ route, go, user, favCount = 0, onLogin, onLogout }) {
+/* Bordeaux tone shared by the navbar's User + Menu icons and the wordmark. */
+const BORDEAUX = "#6B2D2D";
+
+/* Sticky 3-column navbar (User · logo · hamburger) with an RTL slide-in
+   side menu. lucide-react is unavailable in this environment, so the
+   project's inline Icon set / inline SVGs supply the matching glyphs. */
+export function SiteHeader({ go }) {
   const scrolled = useScrolled(8);
   const [open, setOpen] = useState(false);
+  const { requestPublish } = useAuth();
+
   useBodyScrollLock(open);
 
-  const items = [
-    { key: "home", label: "בית" },
-    { key: "publish", label: "פרסמי שמלה" },
-    { key: "favorites", label: "מועדפים", badge: favCount },
-  ];
+  const close = () => setOpen(false);
 
-  const NavLink = ({ item, big }) => (
-    <button
-      type="button"
-      onClick={() => {
-        go(item.key);
-        setOpen(false);
-      }}
-      className={
-        (big ? "text-2xl font-display " : "text-[11px] lg:text-[14px] font-body font-semibold tracking-[0.16em] lg:tracking-[0.2em] uppercase ") +
-        "relative inline-flex items-center gap-1.5 pb-1 transition-colors duration-200 " +
-        (route === item.key ? "text-ink" : "text-muted hover:text-ink")
-      }
-    >
-      {item.label}
-      {item.badge > 0 && (
-        <span className="grid h-4 min-w-4 place-items-center rounded-full bg-brand px-1 text-[9px] font-bold leading-none text-white">
-          {item.badge}
-        </span>
-      )}
-      {route === item.key && (
-        <span className="absolute inset-x-0 -bottom-0.5 h-0.5 rounded-full bg-brand" />
-      )}
-    </button>
-  );
+  /* Run a navigation action, then close the menu. */
+  const navigate = (action) => {
+    action();
+    close();
+  };
+
+  /* "פרסמי שמלה" gate lives in AuthContext (logged-in → /publish, else modal). */
+  const handlePublish = () => {
+    setOpen(false);
+    requestPublish();
+  };
+
+  const links = [
+    { label: "דף הבית", action: () => { go("home"); window.scrollTo({ top: 0, behavior: "smooth" }); } },
+    { label: "גלריה", action: () => { go("home"); setTimeout(() => document.getElementById("browse")?.scrollIntoView({ behavior: "smooth" }), 60); } },
+    { label: "איך זה עובד", action: () => { go("home"); window.scrollTo({ top: 0, behavior: "smooth" }); } },
+    { label: "צור קשר", action: () => { go("home"); window.scrollTo({ top: 0, behavior: "smooth" }); } },
+  ];
 
   return (
     <>
@@ -54,102 +51,156 @@ export function SiteHeader({ route, go, user, favCount = 0, onLogin, onLogout })
             : "1px solid rgba(139,58,58,0.12)",
         }}
       >
-        <div className="mx-auto grid h-[72px] max-w-[1280px] grid-cols-[auto_1fr_auto] items-center gap-6 px-6 lg:px-10">
-          <Logo onClick={() => go("home")} />
+        {/* dir=ltr pins the User icon visually LEFT and the hamburger RIGHT,
+            while the centered logo stays dead-center. */}
+        <div
+          dir="ltr"
+          className="relative mx-auto flex h-[72px] max-w-[1280px] items-center justify-between px-6 lg:px-10"
+        >
+          {/* LEFT — user account placeholder */}
+          <button
+            type="button"
+            aria-label="חשבון משתמש"
+            className="flex h-10 w-10 items-center justify-center rounded-full transition-colors hover:bg-brand-light"
+            style={{ color: BORDEAUX }}
+          >
+            <Icon.user width="20" height="20" className="block" />
+          </button>
 
-          {/* desktop nav — centered (absolutely centered on wide screens so it stays
-              dead-center regardless of the left-pinned account button) */}
-          <nav className="hidden items-center justify-center gap-9 md:flex lg:absolute lg:left-1/2 lg:top-1/2 lg:-translate-x-1/2 lg:-translate-y-1/2">
-            {items.map((it) => (
-              <NavLink key={it.key} item={it} />
-            ))}
-          </nav>
-
-          {/* end actions — pinned to the far-left edge of the navbar on wide screens */}
-          <div className="flex items-center justify-end gap-1 lg:absolute lg:inset-y-0 lg:left-6 lg:z-10">
-            {user ? (
-              <div className="hidden items-center gap-4 md:flex">
-                <button
-                  type="button"
-                  onClick={() => go("account")}
-                  className={
-                    "flex items-center gap-1.5 text-[11px] lg:text-[14px] font-semibold uppercase tracking-[0.16em] lg:tracking-[0.2em] transition-colors " +
-                    (route === "account" ? "text-ink" : "text-muted hover:text-ink")
-                  }
-                >
-                  <Icon.user width="16" height="16" className="block lg:h-[22px] lg:w-[22px]" />
-                  האזור האישי
-                </button>
-                <button
-                  type="button"
-                  onClick={onLogout}
-                  className="text-[11px] lg:text-[14px] font-semibold uppercase tracking-[0.16em] lg:tracking-[0.2em] text-muted transition-colors hover:text-ink"
-                >
-                  יציאה
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={onLogin}
-                aria-label="כניסה לחשבון"
-                className="hidden h-10 w-10 items-center justify-center rounded-full border border-line text-muted transition-colors hover:border-brand hover:text-brand md:flex lg:h-12 lg:w-12"
-              >
-                <Icon.user width="18" height="18" className="block lg:h-[26px] lg:w-[26px]" />
-              </button>
-            )}
-
-            {/* mobile hamburger */}
-            <button
-              type="button"
-              onClick={() => setOpen(true)}
-              aria-label="פתיחת תפריט"
-              className="flex h-10 w-10 items-center justify-center rounded-full text-[#6B2D2D] transition-colors hover:bg-brand-light md:hidden"
+          {/* CENTER — wordmark + tagline, absolutely centered */}
+          <button
+            type="button"
+            onClick={() => navigate(() => { go("home"); window.scrollTo({ top: 0, behavior: "smooth" }); })}
+            title="onenight — דף הבית"
+            className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center leading-none focus:outline-none"
+          >
+            <span
+              dir="ltr"
+              className="font-display text-[26px] font-medium italic lowercase tracking-tight"
+              style={{ color: BORDEAUX }}
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="block">
-                <path d="M4 7h16M4 12h16M4 17h16" />
-              </svg>
-            </button>
-          </div>
+              onenight
+            </span>
+            <span className="mt-0.5 font-body text-[11px] font-medium tracking-[0.22em] text-muted">
+              השכרת שמלות ערב
+            </span>
+          </button>
+
+          {/* RIGHT — hamburger opens the side menu */}
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            aria-label="פתיחת תפריט"
+            aria-expanded={open}
+            className="flex h-10 w-10 items-center justify-center rounded-full transition-colors hover:bg-brand-light"
+            style={{ color: BORDEAUX }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="block">
+              <path d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          </button>
         </div>
       </header>
 
-      {/* mobile full-screen menu */}
-      {open && (
-        <div className="fixed inset-0 z-[60] flex animate-fade-in flex-col bg-canvas md:hidden">
-          <div className="flex h-[72px] items-center justify-between px-6">
-            <Logo onClick={() => { go("home"); setOpen(false); }} />
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              aria-label="סגירת תפריט"
-              className="grid h-10 w-10 place-items-center rounded-full text-ink hover:bg-brand-light"
+      {/* Backdrop */}
+      <div
+        onClick={close}
+        aria-hidden="true"
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 49,
+          background: "rgba(0,0,0,0.4)",
+          backdropFilter: "blur(2px)",
+          WebkitBackdropFilter: "blur(2px)",
+          opacity: open ? 1 : 0,
+          transition: "opacity 0.3s",
+          pointerEvents: open ? "auto" : "none",
+        }}
+      />
+
+      {/* Side menu — slides in from the RIGHT (RTL) */}
+      <aside
+        dir="rtl"
+        aria-hidden={!open}
+        style={{
+          position: "fixed",
+          top: 0,
+          right: 0,
+          width: "75vw",
+          height: "100vh",
+          zIndex: 50,
+          display: "flex",
+          flexDirection: "column",
+          background: "rgba(42, 31, 31, 0.88)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          borderLeft: "1px solid rgba(196, 160, 160, 0.15)",
+          transform: open ? "translateX(0)" : "translateX(100%)",
+          transition: open ? "transform 0.35s ease-out" : "transform 0.3s ease-in",
+        }}
+      >
+        {/* Header: close button (top-right) + centered logo + divider */}
+        <div className="relative pt-6">
+          <button
+            type="button"
+            onClick={close}
+            aria-label="סגירת תפריט"
+            className="absolute bg-transparent"
+            style={{ top: "20px", right: "20px", padding: "4px", color: "rgba(255,255,255,0.8)" }}
+          >
+            <Icon.close width="24" height="24" className="block" />
+          </button>
+
+          <div className="flex flex-col items-center pt-2">
+            <span
+              dir="ltr"
+              className="font-display italic lowercase"
+              style={{ fontSize: "1.5rem", color: "#C4A0A0" }}
             >
-              <Icon.close width="22" height="22" />
-            </button>
+              onenight
+            </span>
+            <span
+              className="mt-3"
+              style={{ width: "40px", height: "1px", background: "rgba(196,160,160,0.2)" }}
+            />
           </div>
-          <nav className="flex flex-1 flex-col items-start gap-7 px-8 pt-10">
-            {items.map((it) => (
-              <NavLink key={it.key} item={it} big />
-            ))}
-            <div className="my-2 h-px w-12 bg-brand" />
-            {user ? (
-              <>
-                <button type="button" onClick={() => { go("account"); setOpen(false); }} className="font-display text-2xl text-muted hover:text-ink">
-                  האזור האישי
-                </button>
-                <button type="button" onClick={() => { onLogout(); setOpen(false); }} className="font-display text-2xl text-muted hover:text-ink">
-                  יציאה
-                </button>
-              </>
-            ) : (
-              <button type="button" onClick={() => { onLogin(); setOpen(false); }} className="font-display text-2xl text-muted hover:text-ink">
-                כניסה לחשבון
-              </button>
-            )}
-          </nav>
         </div>
-      )}
+
+        {/* Navigation links */}
+        <nav className="flex flex-col items-center" style={{ paddingTop: "48px", gap: "32px" }}>
+          {links.map((it) => (
+            <button
+              key={it.label}
+              type="button"
+              onClick={() => navigate(it.action)}
+              className="bg-transparent font-body uppercase text-white/80 transition-colors duration-200 hover:text-white"
+              style={{ fontSize: "1rem", letterSpacing: "0.08em" }}
+            >
+              {it.label}
+            </button>
+          ))}
+        </nav>
+
+        {/* Footer CTA pinned to the bottom */}
+        <div className="mt-auto flex justify-center pb-10">
+          <button
+            type="button"
+            onClick={handlePublish}
+            className="rounded-full bg-transparent transition-colors duration-200"
+            style={{
+              width: "200px",
+              padding: "12px 32px",
+              border: "1px solid #C4A0A0",
+              color: "#C4A0A0",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(196,160,160,0.1)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+          >
+            פרסמי שמלה
+          </button>
+        </div>
+      </aside>
     </>
   );
 }

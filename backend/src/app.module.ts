@@ -6,6 +6,7 @@ import { Dress } from './dresses/dress.entity';
 import { User } from './users/user.entity';
 import { DressesModule } from './dresses/dresses.module';
 import { UsersModule } from './users/users.module';
+import { AuthOtpModule } from './auth-otp/auth-otp.module';
 import { SeedService } from './seed';
 
 @Module({
@@ -24,6 +25,7 @@ import { SeedService } from './seed';
     }),
     DressesModule,
     UsersModule,
+    AuthOtpModule,
   ],
   providers: [SeedService],
 })

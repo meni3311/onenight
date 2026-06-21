@@ -8,6 +8,7 @@ import { useLocalStorage } from "./hooks/useLocalStorage.js";
 import { useToast } from "./hooks/useToast.js";
 import { EMPTY_FILTERS } from "./components/filters/filterConstants.js";
 import { SiteHeader } from "./components/layout/SiteHeader.jsx";
+import { AuthProvider } from "./context/AuthContext.jsx";
 import { Footer } from "./components/layout/Footer.jsx";
 import { Toast } from "./components/ui/Toast.jsx";
 import { DetailModal } from "./components/product/DetailModal.jsx";
@@ -96,6 +97,7 @@ export default function App() {
   const favDresses = favIds.map(dressById).filter(Boolean);
 
   return (
+    <AuthProvider go={go}>
     <div className="min-h-screen bg-canvas font-body text-ink">
       <SiteHeader
         route={route}
@@ -168,5 +170,6 @@ export default function App() {
 
       <Toast message={toastMsg} />
     </div>
+    </AuthProvider>
   );
 }

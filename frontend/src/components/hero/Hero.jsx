@@ -2,7 +2,10 @@
    animated scroll cue. Sits behind the fixed navbar (starts at pixel 0).
    The glass/gradient treatments stay inline as they're computed visual
    washes rather than static utilities. */
-export function Hero({ onPublish, onBrowse }) {
+import { useAuth } from "../../context/AuthContext.jsx";
+
+export function Hero({ onBrowse }) {
+  const { requestPublish } = useAuth();
   return (
     <section
       className="relative overflow-hidden"
@@ -21,16 +24,17 @@ export function Hero({ onPublish, onBrowse }) {
       <div
         dir="ltr"
         className="absolute left-0 top-0 px-6 md:px-12"
-        style={{ paddingTop: "150px", textShadow: "0 2px 14px rgba(0,0,0,0.45)" }}
+        style={{ paddingTop: "200px", textShadow: "0 2px 14px rgba(0,0,0,0.45)" }}
       >
-        <h1 className="text-left font-display text-[3rem] font-light italic leading-[1.02] text-white md:text-[4.25rem]">
-          Don’t buy it.<br /><span className="font-bold text-[#6B2D2D] text-[4rem] md:text-[5.75rem]">Rent it.</span>
+        <h1 className="text-left font-playfair text-[3rem] font-normal italic leading-[1.02] text-white md:text-[4.25rem]">
+          Don’t buy it.<br /><span className="font-normal text-[#6B2D2D] text-[4rem] md:text-[5.75rem]">Rent it.</span>
         </h1>
       </div>
 
       {/* Glassmorphism CTAs — vertically centered, stacked & centered */}
       <div
         dir="ltr"
+        style={{ paddingTop: "100px" }}
         className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-3"
       >
         <button
@@ -50,7 +54,7 @@ export function Hero({ onPublish, onBrowse }) {
         </button>
         <button
           type="button"
-          onClick={onPublish}
+          onClick={requestPublish}
           style={{
             background: "transparent",
             border: "1.5px solid #6B2D2D",
