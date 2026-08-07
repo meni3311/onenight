@@ -21,7 +21,7 @@ export class OtpService {
   private readonly logger = new Logger('OtpService');
   private readonly store = new Map<string, OtpRecord>();
   private readonly TTL_MS = 10 * 60 * 1000; // 10 minutes
-  private readonly from = process.env.MAIL_FROM || 'onenight <onboarding@resend.dev>';
+  private readonly from = process.env.RESEND_FROM || 'onenight <onboarding@resend.dev>';
 
   private normalize(email: string): string {
     return (email || '').trim().toLowerCase();

@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { Dress } from './dress.entity';
+import { DressesController } from './dresses.controller';
 import { DressesService } from './dresses.service';
-import { AdminController, DressesController } from './dresses.controller';
 
+/**
+ * Dress-detail feature module. Depends on the global PrismaModule for data
+ * access, so no provider wiring beyond the service is required here.
+ */
 @Module({
-  imports: [TypeOrmModule.forFeature([Dress])],
-  controllers: [DressesController, AdminController],
+  controllers: [DressesController],
   providers: [DressesService],
   exports: [DressesService],
 })

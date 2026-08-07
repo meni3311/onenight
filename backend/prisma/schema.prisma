@@ -1,0 +1,95 @@
+// Prisma schema for the onenight dress-rental marketplace.
+// Database: Supabase (PostgreSQL).
+//   DATABASE_URL  — pooled connection (PgBouncer, port 6543) used at runtime
+//   DIRECT_URL    — direct connection (port 5432) used for migrations
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum DressCondition {
+  NEW
+  LIKE_NEW
+  VERY_GOOD
+  GOOD
+  FAIR
+}
+
+enum DressSource {
+  PERSONAL_TAILOR
+  BOUTIQUE
+  STORE
+}
+
+model Dress {
+  id          String         @id @default(uuid())
+  name        String
+  description String?
+  price       Float
+  fabric      String?
+  color       String?
+  length      String?
+  designer    String?
+  source      DressSource
+  condition   DressCondition
+  sizes       DressSize[]
+  images      DressImage[]
+  bookings    Booking[]
+  reviews     Review[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([color])
+  @@index([source])
+}
+
+model DressSize {
+  id        String  @id @default(uuid())
+  dress     Dress   @relation(fields: [dressId], references: [id], onDelete: Cascade)
+  dressId   String
+  size      String // XS, S, M, L, XL, XXL
+  available Boolean @default(true)
+
+  @@index([dressId])
+}
+
+model DressImage {
+  id      String @id @default(uuid())
+  dress   Dress  @relation(fields: [dressId], references: [id], onDelete: Cascade)
+  dressId String
+  url     String
+  order   Int
+
+  @@index([dressId])
+}
+
+model Booking {
+  id        String   @id @default(uuid())
+  dress     Dress    @relation(fields: [dressId], references: [id], onDelete: Cascade)
+  dressId   String
+  startDate DateTime
+  endDate   DateTime
+  size      String
+  createdAt DateTime @default(now())
+
+  @@index([dressId])
+  @@index([startDate, endDate])
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  dress     Dress    @relation(fields: [dressId], references: [id], onDelete: Cascade)
+  dressId   String
+  reviewer  String
+  rating    Int // 1–5
+  text      String
+  sizeWorn  String
+  createdAt DateTime @default(now())
+
+  @@index([dressId])
+}

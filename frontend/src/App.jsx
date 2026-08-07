@@ -11,7 +11,7 @@ import { SiteHeader } from "./components/layout/SiteHeader.jsx";
 import { AuthProvider } from "./context/AuthContext.jsx";
 import { Footer } from "./components/layout/Footer.jsx";
 import { Toast } from "./components/ui/Toast.jsx";
-import { DetailModal } from "./components/product/DetailModal.jsx";
+import ProductPage from "./pages/ProductPage.jsx";
 import HomePage from "./pages/HomePage.jsx";
 import FavoritesPage from "./pages/FavoritesPage.jsx";
 import PublishPage from "./pages/PublishPage.jsx";
@@ -157,12 +157,14 @@ export default function App() {
       {route === "admin" && <AdminPage dresses={dresses} setDresses={setDresses} toast={toast} />}
 
       {selected && (
-        <DetailModal
+        <ProductPage
           d={selected}
           fav={favIds.includes(selected.id)}
           onFav={toggleFav}
           onClose={() => setSelected(null)}
           toast={toast}
+          similar={dresses.filter((x) => x.status === "approved" && x.id !== selected.id)}
+          onOpenSimilar={(dr) => { setSelected(dr); window.scrollTo({ top: 0 }); }}
         />
       )}
 

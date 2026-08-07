@@ -1,64 +1,61 @@
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
+  Body,
+  Controller,
+  DefaultValuePipe,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  Query,
 } from '@nestjs/common';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { DressesService } from './dresses.service';
-import { Dress, DressStatus } from './dress.entity';
-import { AdminGuard, ADMIN_PASSWORD } from '../common/admin.guard';
+import { CheckAvailabilityDto } from './dto/check-availability.dto';
+import {
+  AvailabilityResultDto,
+  DressDetailDto,
+  DressSummaryDto,
+  UnavailableDateRangeDto,
+} from './dto/dress-detail.dto';
 
-@Controller('api/dresses')
+@ApiTags('dresses')
+@Controller('dresses')
 export class DressesController {
   constructor(private readonly service: DressesService) {}
 
-  // Public catalog. Defaults to approved. Admin can pass ?status=pending|approved|rejected|all
-  @Get()
-  findAll(@Query('status') status?: string) {
-    return this.service.findAll(status || 'approved');
-  }
-
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  @ApiOperation({ summary: 'Get full dress detail with sizes, images, reviews' })
+  @ApiResponse({ status: 200, type: DressDetailDto })
+  getDressById(@Param('id') id: string): Promise<DressDetailDto> {
+    return this.service.getDressById(id);
   }
 
-  // Publish — no auth required, lands as pending
-  @Post()
-  create(@Body() body: Partial<Dress>) {
-    return this.service.create(body);
+  @Get(':id/unavailable-dates')
+  @ApiOperation({ summary: 'List booked (unavailable) date ranges for a dress' })
+  @ApiResponse({ status: 200, type: [UnavailableDateRangeDto] })
+  getUnavailableDates(
+    @Param('id') id: string,
+  ): Promise<UnavailableDateRangeDto[]> {
+    return this.service.getUnavailableDates(id);
   }
 
-  // Edit listing fields (owner self-service in the demo)
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() body: Partial<Dress>) {
-    return this.service.update(id, body);
+  @Post(':id/check-availability')
+  @ApiOperation({ summary: 'Check whether a dress+size is free for a date range' })
+  @ApiResponse({ status: 200, type: AvailabilityResultDto })
+  checkAvailability(
+    @Param('id') id: string,
+    @Body() dto: CheckAvailabilityDto,
+  ): Promise<AvailabilityResultDto> {
+    return this.service.checkAvailability(id, dto);
   }
 
-  // Toggle a single availability date
-  @Patch(':id/booked')
-  toggleBooked(@Param('id') id: string, @Body() body: { key?: string; booked?: string[] }) {
-    if (Array.isArray(body.booked)) return this.service.setBooked(id, body.booked);
-    return this.service.toggleBooked(id, body.key);
-  }
-
-  // ----- Admin-only -----
-  @UseGuards(AdminGuard)
-  @Patch(':id/status')
-  setStatus(@Param('id') id: string, @Body() body: { status: DressStatus; rejectReason?: string }) {
-    return this.service.setStatus(id, body.status, body.rejectReason || '');
-  }
-
-  @UseGuards(AdminGuard)
-  @Delete(':id')
-  async remove(@Param('id') id: string) {
-    await this.service.remove(id);
-    return { ok: true };
-  }
-}
-
-@Controller('api/admin')
-export class AdminController {
-  // Lightweight password check so the frontend can gate the admin panel
-  @Post('login')
-  login(@Body() body: { password?: string }) {
-    return { ok: body?.password === ADMIN_PASSWORD };
+  @Get(':id/similar')
+  @ApiOperation({ summary: 'Get similar dresses (same colour or source)' })
+  @ApiResponse({ status: 200, type: [DressSummaryDto] })
+  getSimilarDresses(
+    @Param('id') id: string,
+    @Query('limit', new DefaultValuePipe(4), ParseIntPipe) limit: number,
+  ): Promise<DressSummaryDto[]> {
+    return this.service.getSimilarDresses(id, limit);
   }
 }

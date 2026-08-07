@@ -2,23 +2,24 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
-import { Dress } from './dresses/dress.entity';
 import { User } from './users/user.entity';
+import { PrismaModule } from './prisma/prisma.module';
 import { DressesModule } from './dresses/dresses.module';
 import { UsersModule } from './users/users.module';
 import { AuthOtpModule } from './auth-otp/auth-otp.module';
-import { SeedService } from './seed';
 
 @Module({
   imports: [
-    // SQLite database — single file at backend/data/onenight.sqlite
+    // Prisma (PostgreSQL / Supabase) — powers the dresses feature.
+    PrismaModule,
+    // Legacy SQLite store, still backing users + auth during migration.
     TypeOrmModule.forRoot({
       type: 'better-sqlite3',
       database: join(__dirname, '..', 'data', 'onenight.sqlite'),
-      entities: [Dress, User],
-      synchronize: true, // auto-creates tables; fine for this app
+      entities: [User],
+      synchronize: true,
     }),
-    // Serve the frontend (../frontend/index.html) at http://localhost:3000
+    // Serve the frontend (../frontend) at http://localhost:3000
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', '..', 'frontend'),
       serveStaticOptions: { index: ['index.html'] },
@@ -27,6 +28,5 @@ import { SeedService } from './seed';
     UsersModule,
     AuthOtpModule,
   ],
-  providers: [SeedService],
 })
 export class AppModule {}
