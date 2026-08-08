@@ -1,5 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { DressCondition, DressSource } from '@prisma/client';
+import {
+  DressCondition,
+  DressLength,
+  DressSource,
+  SleeveLength,
+} from '@prisma/client';
 
 export class DressSizeDto {
   @ApiProperty() id!: string;
@@ -34,6 +39,8 @@ export class DressDetailDto {
   @ApiProperty({ nullable: true, type: String }) designer!: string | null;
   @ApiProperty({ enum: DressSource }) source!: DressSource;
   @ApiProperty({ enum: DressCondition }) condition!: DressCondition;
+  @ApiProperty({ enum: DressLength }) dressLength!: DressLength;
+  @ApiProperty({ enum: SleeveLength }) sleeveLength!: SleeveLength;
   @ApiProperty({ type: [DressSizeDto] }) sizes!: DressSizeDto[];
   @ApiProperty({ type: [DressImageDto] }) images!: DressImageDto[];
   @ApiProperty({ type: [ReviewDto] }) reviews!: ReviewDto[];
@@ -44,6 +51,18 @@ export class DressSummaryDto {
   @ApiProperty() id!: string;
   @ApiProperty() name!: string;
   @ApiProperty() price!: number;
+  @ApiProperty({ type: [DressImageDto] }) images!: DressImageDto[];
+}
+
+/** Card shape for GET /dresses (browse/filter list). */
+export class DressListItemDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() name!: string;
+  @ApiProperty() price!: number;
+  @ApiProperty({ nullable: true, type: String }) color!: string | null;
+  @ApiProperty({ enum: DressSource }) source!: DressSource;
+  @ApiProperty({ enum: DressLength }) dressLength!: DressLength;
+  @ApiProperty({ enum: SleeveLength }) sleeveLength!: SleeveLength;
   @ApiProperty({ type: [DressImageDto] }) images!: DressImageDto[];
 }
 

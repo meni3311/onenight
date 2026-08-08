@@ -10,6 +10,10 @@ export type DressConditionValue =
   | 'GOOD'
   | 'FAIR';
 
+export type DressLengthValue = 'SHORT' | 'MEDIUM' | 'LONG';
+
+export type SleeveLengthValue = 'SHORT' | 'MEDIUM' | 'LONG';
+
 export interface DressSize {
   id: string;
   size: string;
@@ -42,6 +46,8 @@ export interface DressDetail {
   designer: string | null;
   source: DressSourceValue;
   condition: DressConditionValue;
+  dressLength: DressLengthValue;
+  sleeveLength: SleeveLengthValue;
   sizes: DressSize[];
   images: DressImage[];
   reviews: Review[];

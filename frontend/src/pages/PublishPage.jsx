@@ -1,21 +1,37 @@
-import { useState, useRef } from "react";
-import { REGIONS, SIZES, LENGTHS, CONDITIONS } from "../lib/data.js";
+import { useState, useRef, useEffect } from "react";
+import { REGIONS, SIZES, LENGTHS, CONDITIONS, DRESS_LENGTHS, SLEEVE_LENGTHS } from "../lib/data.js";
 import { DEFAULT_DRESS_COLOR_HEX } from "../constants/theme.js";
+import { useAuth } from "../context/AuthContext.jsx";
 
 const EMPTY_FORM = {
   title: "", desc: "", color: "", condition: "", length: "", price: "",
   region: "", size: "", source: "", store: "", phone: "", email: "",
+  dressLength: "", sleeveLength: "",
 };
 const MAX_IMAGES = 3;
 
+/* Strip everything but digits so "050-1234567" and "050 1234567" validate
+   the same as "0501234567". */
+const normalizePhone = (s) => (s || "").replace(/\D/g, "");
+
 /* Publish-a-dress form with client-side validation and image previews. */
 export default function PublishPage({ onSubmit, goHome }) {
-  const [v, setV] = useState(EMPTY_FORM);
+  const { isLoggedIn, account } = useAuth();
+  const [v, setV] = useState(() => ({ ...EMPTY_FORM, email: account?.email || "" }));
   const [images, setImages] = useState([]);
   const [errors, setErrors] = useState({});
   const [drag, setDrag] = useState(false);
   const fileRef = useRef();
   const set = (k, val) => setV((p) => ({ ...p, [k]: val }));
+
+  /* Ownership is keyed by the account's email (see AccountPage's "my
+     listings" filter) — while signed in, lock the field to that address
+     instead of a free-typed one so the listing reliably shows up under
+     "השמלות שהעליתי" afterwards. Re-syncs if the user logs in mid-visit
+     (the auth modal is reachable from the navbar on every page). */
+  useEffect(() => {
+    if (isLoggedIn && account?.email) set("email", account.email);
+  }, [isLoggedIn, account?.email]);
 
   const handleFiles = (list) => {
     const arr = Array.from(list).slice(0, MAX_IMAGES - images.length);
@@ -31,12 +47,14 @@ export default function PublishPage({ onSubmit, goHome }) {
     if (!v.desc.trim()) e.desc = "נא להזין תיאור";
     if (!v.condition) e.condition = "נא לבחור מצב";
     if (!v.length) e.length = "נא לבחור אורך";
+    if (!v.dressLength) e.dressLength = "נא לבחור אורך שמלה";
+    if (!v.sleeveLength) e.sleeveLength = "נא לבחור אורך שרוול";
     if (!v.price || +v.price <= 0) e.price = "נא להזין מחיר";
     if (!v.region) e.region = "נא לבחור אזור";
     if (!v.size) e.size = "נא לבחור מידה";
     if (!v.source) e.source = "נא לבחור מקור";
     if (v.source === "שם חנות" && !v.store.trim()) e.store = "נא להזין שם חנות";
-    if (!/^0\d{8,9}$/.test(v.phone.trim())) e.phone = "מספר טלפון לא תקין";
+    if (!/^0\d{8,9}$/.test(normalizePhone(v.phone))) e.phone = "מספר טלפון לא תקין (לדוגמה 050-1234567)";
     if (!/^\S+@\S+\.\S+$/.test(v.email.trim())) e.email = "כתובת מייל לא תקינה";
     if (images.length === 0) e.images = "נא להעלות לפחות תמונה אחת";
     setErrors(e);
@@ -44,7 +62,8 @@ export default function PublishPage({ onSubmit, goHome }) {
   };
   const submit = () => {
     if (!validate()) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
-    onSubmit({ ...v, price: +v.price, images, colorHex: DEFAULT_DRESS_COLOR_HEX });
+    /* Phone is contact info only — never used to match ownership. */
+    onSubmit({ ...v, phone: normalizePhone(v.phone), price: +v.price, images, colorHex: DEFAULT_DRESS_COLOR_HEX });
   };
 
   return (
@@ -74,6 +93,16 @@ export default function PublishPage({ onSubmit, goHome }) {
               <option value="">בחרי…</option>{LENGTHS.map((c) => <option key={c}>{c}</option>)}
             </select>{errors.length && <span className="err">{errors.length}</span>}</div>
 
+          <div className="field"><label>אורך שמלה</label>
+            <select value={v.dressLength} onChange={(e) => set("dressLength", e.target.value)}>
+              <option value="">בחרי…</option>{DRESS_LENGTHS.map((c) => <option key={c}>{c}</option>)}
+            </select>{errors.dressLength && <span className="err">{errors.dressLength}</span>}</div>
+
+          <div className="field"><label>אורך שרוול</label>
+            <select value={v.sleeveLength} onChange={(e) => set("sleeveLength", e.target.value)}>
+              <option value="">בחרי…</option>{SLEEVE_LENGTHS.map((c) => <option key={c}>{c}</option>)}
+            </select>{errors.sleeveLength && <span className="err">{errors.sleeveLength}</span>}</div>
+
           <div className="field"><label>מחיר להשכרה ₪</label>
             <input type="number" placeholder="0" value={v.price} onChange={(e) => set("price", e.target.value)} />
             {errors.price && <span className="err">{errors.price}</span>}</div>
@@ -102,7 +131,16 @@ export default function PublishPage({ onSubmit, goHome }) {
             {errors.phone && <span className="err">{errors.phone}</span>}</div>
 
           <div className="field"><label>מייל (לעדכונים)</label>
-            <input type="email" placeholder="your@email.com" value={v.email} onChange={(e) => set("email", e.target.value)} />
+            {isLoggedIn ? (
+              <>
+                <input type="email" value={v.email} disabled className="opacity-70" />
+                <p className="mt-1 text-[11px] text-[var(--muted)]">
+                  מחוברת כ-{v.email} — המודעה תופיע תחת "השמלות שלי" בתפריט המשתמש שלך
+                </p>
+              </>
+            ) : (
+              <input type="email" placeholder="your@email.com" value={v.email} onChange={(e) => set("email", e.target.value)} />
+            )}
             {errors.email && <span className="err">{errors.email}</span>}</div>
 
           <div className="field full"><label>תמונות (עד 3)</label>

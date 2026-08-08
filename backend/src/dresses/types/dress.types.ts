@@ -3,7 +3,12 @@
  * Enums are re-exported from the generated Prisma client so there is a single
  * source of truth for condition/source values across the codebase.
  */
-export { DressCondition, DressSource } from '@prisma/client';
+export {
+  DressCondition,
+  DressSource,
+  DressLength,
+  SleeveLength,
+} from '@prisma/client';
 
 /** A contiguous, inclusive range of dates the dress cannot be rented. */
 export interface UnavailableDateRange {

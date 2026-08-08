@@ -26,6 +26,49 @@ enum DressSource {
   STORE
 }
 
+enum DressLength {
+  SHORT
+  MEDIUM
+  LONG
+}
+
+enum SleeveLength {
+  SHORT
+  MEDIUM
+  LONG
+}
+
+// Mirrors the (now-retired) TypeORM `users` entity field-for-field, so the
+// SQLite → Postgres move is a pure persistence swap with no behaviour change.
+// NOTE: `id` is app-generated (uuid) rather than mirroring auth.users.id from
+// Supabase Auth — the rows migrated out of SQLite already carry their own
+// uuids, and login is email+password via bcrypt, not Supabase Auth.
+model User {
+  id       String  @id @default(uuid())
+  name     String
+  email    String  @unique
+  phone    String?
+  // Deliberately nullable and NOT unique: it's a display-only handle derived
+  // from the email local-part (see UsersService.deriveUsername), never used
+  // for login or lookup. One migrated row already has NULL here, and derived
+  // handles can legitimately collide across different email domains.
+  username String?
+  city     String?
+  password String // bcrypt hash, stored as-is — never re-hashed
+  verified Boolean @default(false)
+  // Opt-out consent: the registration checkbox is checked by default, and the
+  // service falls back to `true` when a client omits the field.
+  marketingConsent Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  dresses          Dress[]
+  bookingsMade     Booking[]  @relation("renter")
+  bookingsReceived Booking[]  @relation("lister")
+  reviewsWritten   Review[]   @relation("reviewer")
+  favorites        Favorite[]
+}
+
 model Dress {
   id          String         @id @default(uuid())
   name        String
@@ -37,15 +80,30 @@ model Dress {
   designer    String?
   source      DressSource
   condition   DressCondition
+  // `dressLength`/`sleeveLength` are the new structured filter fields (short/
+  // medium/long each). They are intentionally separate from the pre-existing
+  // free-form `length` column above rather than replacing it — the brief
+  // asked only to add these two new fields, not to touch other filter
+  // categories. Flag if `length` should eventually be retired in favor of
+  // `dressLength`.
+  dressLength  DressLength
+  sleeveLength SleeveLength
+  ownerId     String
+  owner       User           @relation(fields: [ownerId], references: [id])
+  status      String         @default("pending") // pending | approved | rejected
   sizes       DressSize[]
   images      DressImage[]
   bookings    Booking[]
   reviews     Review[]
+  favorites   Favorite[]
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
   @@index([color])
   @@index([source])
+  @@index([ownerId])
+  @@index([dressLength])
+  @@index([sleeveLength])
 }
 
 model DressSize {
@@ -77,19 +135,59 @@ model Booking {
   size      String
   createdAt DateTime @default(now())
 
+  renterId    String
+  renter      User      @relation("renter", fields: [renterId], references: [id])
+  listerId    String
+  lister      User      @relation("lister", fields: [listerId], references: [id])
+  status      String    @default("pending") // pending | confirmed | declined | expired
+  requestedAt DateTime  @default(now())
+  respondsBy  DateTime // application code sets this = requestedAt + 24h
+  respondedAt DateTime?
+  // Back-relation for Review.booking's one-to-one @unique bookingId.
+  review      Review?
+
   @@index([dressId])
   @@index([startDate, endDate])
+  @@index([renterId])
+  @@index([listerId])
 }
 
 model Review {
-  id        String   @id @default(uuid())
-  dress     Dress    @relation(fields: [dressId], references: [id], onDelete: Cascade)
-  dressId   String
-  reviewer  String
-  rating    Int // 1–5
-  text      String
-  sizeWorn  String
+  id       String @id @default(uuid())
+  dress    Dress  @relation(fields: [dressId], references: [id], onDelete: Cascade)
+  dressId  String
+  reviewer String
+  rating   Int // 1–5
+  text     String
+  sizeWorn String
   createdAt DateTime @default(now())
 
+  // NOTE: the brief asked for these new fields to include a relation field
+  // literally named `reviewer`, but this model already has an (unrelated,
+  // free-text) `reviewer String` column — keeping both under the same name
+  // isn't possible. Since the brief also said not to rename/delete any
+  // existing column, the old `reviewer` string is left untouched and the
+  // new user relation is named `reviewerUser` instead. Flag if you'd
+  // rather retire the free-text field in favor of the relation.
+  reviewerId   String
+  reviewerUser User     @relation("reviewer", fields: [reviewerId], references: [id])
+  revieweeId   String
+  bookingId    String   @unique // one review per completed booking
+  booking      Booking  @relation(fields: [bookingId], references: [id])
+
+  @@index([dressId])
+  @@index([reviewerId])
+}
+
+model Favorite {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  dressId   String
+  dress     Dress    @relation(fields: [dressId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, dressId])
+  @@index([userId])
   @@index([dressId])
 }

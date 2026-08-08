@@ -13,11 +13,11 @@
     "prisma:deploy": "prisma migrate deploy"
   },
   "dependencies": {
-    "@nestjs/common": "^10.3.10",
+    "@nestjs/common": "^11.1.28",
     "@nestjs/core": "^11.1.28",
     "@nestjs/platform-express": "^11.1.28",
     "@nestjs/serve-static": "^5.0.5",
-    "@nestjs/swagger": "^11.4.6",
+    "@nestjs/swagger": "^11.4.5",
     "@nestjs/typeorm": "^11.0.3",
     "@prisma/client": "^5.18.0",
     "bcryptjs": "^2.4.3",

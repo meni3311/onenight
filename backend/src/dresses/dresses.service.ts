@@ -6,8 +6,11 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
+import { CreateDressDto } from './dto/create-dress.dto';
+import { ListDressesQueryDto } from './dto/list-dresses-query.dto';
 import {
   DressDetailDto,
+  DressListItemDto,
   DressSummaryDto,
   AvailabilityResultDto,
 } from './dto/dress-detail.dto';
@@ -47,6 +50,8 @@ export class DressesService {
         designer: dress.designer,
         source: dress.source,
         condition: dress.condition,
+        dressLength: dress.dressLength,
+        sleeveLength: dress.sleeveLength,
         sizes: dress.sizes.map((s) => ({
           id: s.id,
           size: s.size,
@@ -179,6 +184,119 @@ export class DressesService {
       if (error instanceof NotFoundException) throw error;
       throw new InternalServerErrorException('Failed to load similar dresses');
     }
+  }
+
+  /**
+   * Browse/filter list. Every provided category is AND'd together; within
+   * `colors` / `dressLengths` / `sleeveLengths`, values are OR'd (Prisma
+   * `in`). There is no `condition` filter here by design (task brief §3) —
+   * the column itself is untouched and still returned by `getDressById`.
+   */
+  async listDresses(query: ListDressesQueryDto): Promise<DressListItemDto[]> {
+    try {
+      const where: Prisma.DressWhereInput = {};
+
+      if (query.minPrice !== undefined || query.maxPrice !== undefined) {
+        where.price = {
+          ...(query.minPrice !== undefined ? { gte: query.minPrice } : {}),
+          ...(query.maxPrice !== undefined ? { lte: query.maxPrice } : {}),
+        };
+      }
+      if (query.colors?.length) {
+        where.color = { in: query.colors };
+      }
+      if (query.dressLengths?.length) {
+        where.dressLength = { in: query.dressLengths };
+      }
+      if (query.sleeveLengths?.length) {
+        where.sleeveLength = { in: query.sleeveLengths };
+      }
+
+      const dresses = await this.prisma.dress.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        include: { images: { orderBy: { order: 'asc' } } },
+      });
+
+      return dresses.map((d) => ({
+        id: d.id,
+        name: d.name,
+        price: d.price,
+        color: d.color,
+        source: d.source,
+        dressLength: d.dressLength,
+        sleeveLength: d.sleeveLength,
+        images: d.images.map((img) => ({
+          id: img.id,
+          url: img.url,
+          order: img.order,
+        })),
+      }));
+    } catch (error) {
+      throw new InternalServerErrorException('Failed to load dresses');
+    }
+  }
+
+  /**
+   * Create a new listing. `ownerId` is taken directly from the request body
+   * for now — wiring it to the authenticated session is a separate,
+   * pre-existing auth concern this task doesn't touch. `status` keeps its
+   * schema default ("pending"); the approval flow is untouched too.
+   */
+  async createDress(dto: CreateDressDto): Promise<DressDetailDto> {
+    const created = await this.prisma.dress.create({
+      data: {
+        name: dto.name,
+        description: dto.description,
+        price: dto.price,
+        fabric: dto.fabric,
+        color: dto.color,
+        length: dto.length,
+        designer: dto.designer,
+        source: dto.source,
+        condition: dto.condition,
+        dressLength: dto.dressLength,
+        sleeveLength: dto.sleeveLength,
+        ownerId: dto.ownerId,
+        sizes: dto.sizes?.length
+          ? { create: dto.sizes.map((size) => ({ size, available: true })) }
+          : undefined,
+        images: dto.images?.length
+          ? { create: dto.images.map((url, order) => ({ url, order })) }
+          : undefined,
+      },
+      include: {
+        sizes: true,
+        images: { orderBy: { order: 'asc' } },
+        reviews: true,
+      },
+    });
+
+    return {
+      id: created.id,
+      name: created.name,
+      description: created.description,
+      price: created.price,
+      fabric: created.fabric,
+      color: created.color,
+      length: created.length,
+      designer: created.designer,
+      source: created.source,
+      condition: created.condition,
+      dressLength: created.dressLength,
+      sleeveLength: created.sleeveLength,
+      sizes: created.sizes.map((s) => ({
+        id: s.id,
+        size: s.size,
+        available: s.available,
+      })),
+      images: created.images.map((img) => ({
+        id: img.id,
+        url: img.url,
+        order: img.order,
+      })),
+      reviews: [],
+    };
   }
 
   private async assertDressExists(id: string): Promise<void> {

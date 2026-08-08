@@ -1,7 +1,10 @@
+import { useAuth } from "../../context/AuthContext.jsx";
+
 /* Site footer: brand blurb, nav shortcuts, contact details. The `.footer`
    styles live in styles.css; static spacing/typography use Tailwind utilities. */
 export function Footer({ go, toast }) {
   const year = new Date().getFullYear();
+  const { requestPublish } = useAuth();
   return (
     <footer className="footer">
       <div className="footer-inner">
@@ -16,7 +19,7 @@ export function Footer({ go, toast }) {
           <h4>ניווט</h4>
           <p className="m-0 leading-[2]">
             <a onClick={() => go("home")}>בית</a><br />
-            <a onClick={() => go("publish")}>פרסום שמלה</a><br />
+            <a onClick={requestPublish}>פרסום שמלה</a><br />
             <a onClick={() => go("favorites")}>מועדפים</a>
           </p>
         </div>

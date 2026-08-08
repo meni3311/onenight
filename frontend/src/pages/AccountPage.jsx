@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { REGIONS, SIZES, LENGTHS, CONDITIONS, placeholder } from "../lib/data.js";
 import { api } from "../lib/api.js";
-import { ProductCard } from "../components/gallery/ProductCard.jsx";
 import { Calendar } from "../components/calendar/Calendar.jsx";
+import { useAuth } from "../context/AuthContext.jsx";
 
 /* Inline edit form for one of the user's dress listings. */
 function EditFields({ d, setD }) {
@@ -22,15 +22,27 @@ function EditFields({ d, setD }) {
 }
 
 const STATUS_LABELS = { approved: "מאושרת", pending: "ממתינה", rejected: "נדחתה" };
-const TABS = [["ads", "המודעות שלי"], ["cal", "יומן זמינות"], ["favs", "מועדפים"], ["account", "פרטי חשבון"]];
+const TABS = [["ads", "המודעות שלי"], ["cal", "יומן זמינות"], ["account", "פרטי חשבון"]];
 
-/* Signed-in user's area: their listings, availability calendars, favorites
-   and editable account details. */
-export default function AccountPage({ user, dresses, setDresses, favIds, dressById, onOpen, onFav, setUser, toast }) {
-  const [tab, setTab] = useState("ads");
+/* Signed-in user's area: their listings, availability calendars, and
+   editable account details. Favorites live on their own page, reached
+   via "המועדפים שלי" in the personal-area dropdown — not a tab here. */
+export default function AccountPage({ user, dresses, setDresses, onOpen, setUser, toast, initialTab }) {
+  const { requestPublish } = useAuth();
+  const [tab, setTab] = useState(initialTab || "ads");
   const [editing, setEditing] = useState(null);
-  const myAds = dresses.filter((d) => d.phone === user.phone);
-  const favs = favIds.map(dressById).filter(Boolean);
+
+  /* Route stays "account" across dropdown clicks (e.g. listings → profile),
+     so the page doesn't remount — resync the active tab when it changes. */
+  useEffect(() => { if (initialTab) setTab(initialTab); }, [initialTab]);
+
+  /* Ownership is keyed by email (the account identity from the OTP auth
+     flow), not phone — the OTP flow never collects a phone number, so
+     phone-based matching left every account's listings empty. */
+  const myEmail = (user.email || "").trim().toLowerCase();
+  const myAds = myEmail
+    ? dresses.filter((d) => (d.email || "").trim().toLowerCase() === myEmail)
+    : [];
 
   const saveEdit = async () => {
     try {
@@ -78,7 +90,7 @@ export default function AccountPage({ user, dresses, setDresses, favIds, dressBy
             <p className="mt-2 text-[12px] text-[var(--muted)]">לשינוי תמונה יש לפנות לשירות לקוחות</p>
           </div>
         </div>
-      )) : <div className="empty">עדיין אין לך מודעות. <span className="link-rose" onClick={() => toast("מעבר לפרסום שמלה")}>פרסמי שמלה ראשונה</span></div>)}
+      )) : <div className="empty">עדיין אין לך מודעות. <span className="link-rose" onClick={requestPublish}>פרסמי שמלה ראשונה</span></div>)}
 
       {tab === "cal" && (myAds.length ? myAds.map((d) => (
         <div key={d.id} className="mb-6">
@@ -87,10 +99,6 @@ export default function AccountPage({ user, dresses, setDresses, favIds, dressBy
           <div className="max-w-[320px]"><Calendar booked={d.booked} editable onToggle={(k) => toggleDate(d.id, k)} /></div>
         </div>
       )) : <div className="empty">אין מודעות להצגת יומן.</div>)}
-
-      {tab === "favs" && (favs.length ? <div className="grid">
-        {favs.map((d) => <ProductCard key={d.id} d={d} fav={true} onFav={onFav} onOpen={onOpen} />)}
-      </div> : <div className="empty">עדיין אין מועדפים — לחצי על הלב בשמלות שאהבת ♡</div>)}
 
       {tab === "account" && <div className="form-card m-0 max-w-[440px]">
         <div className="field mb-[14px]"><label>שם מלא</label><input type="text" value={user.name} onChange={(e) => setUser({ ...user, name: e.target.value })} /></div>

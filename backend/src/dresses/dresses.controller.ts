@@ -11,9 +11,12 @@ import {
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { DressesService } from './dresses.service';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
+import { CreateDressDto } from './dto/create-dress.dto';
+import { ListDressesQueryDto } from './dto/list-dresses-query.dto';
 import {
   AvailabilityResultDto,
   DressDetailDto,
+  DressListItemDto,
   DressSummaryDto,
   UnavailableDateRangeDto,
 } from './dto/dress-detail.dto';
@@ -22,6 +25,20 @@ import {
 @Controller('dresses')
 export class DressesController {
   constructor(private readonly service: DressesService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'Browse/filter dresses (price range, colors, dress/sleeve length — AND across categories, OR within one)' })
+  @ApiResponse({ status: 200, type: [DressListItemDto] })
+  listDresses(@Query() query: ListDressesQueryDto): Promise<DressListItemDto[]> {
+    return this.service.listDresses(query);
+  }
+
+  @Post()
+  @ApiOperation({ summary: 'Publish a new dress listing' })
+  @ApiResponse({ status: 201, type: DressDetailDto })
+  createDress(@Body() dto: CreateDressDto): Promise<DressDetailDto> {
+    return this.service.createDress(dto);
+  }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get full dress detail with sizes, images, reviews' })

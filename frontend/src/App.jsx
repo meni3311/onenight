@@ -8,7 +8,7 @@ import { useLocalStorage } from "./hooks/useLocalStorage.js";
 import { useToast } from "./hooks/useToast.js";
 import { EMPTY_FILTERS } from "./components/filters/filterConstants.js";
 import { SiteHeader } from "./components/layout/SiteHeader.jsx";
-import { AuthProvider } from "./context/AuthContext.jsx";
+import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import { Footer } from "./components/layout/Footer.jsx";
 import { Toast } from "./components/ui/Toast.jsx";
 import ProductPage from "./pages/ProductPage.jsx";
@@ -19,8 +19,73 @@ import ThankYou from "./pages/ThankYou.jsx";
 import AuthPage from "./pages/AuthPage.jsx";
 import AccountPage from "./pages/AccountPage.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
+import TermsPage from "./pages/TermsPage.jsx";
 
-const routeFromHash = () => (location.hash.replace("#", "") === "admin" ? "admin" : "home");
+/* Routes reachable via a real URL hash (bookmarkable / open-in-new-tab),
+   same pattern the admin panel already uses (see README: /#admin). The
+   registration form's terms link opens /#terms in a new tab this way,
+   rather than needing its own modal-on-modal treatment. */
+const HASH_ROUTES = new Set(["admin", "terms"]);
+const routeFromHash = () => {
+  const h = location.hash.replace("#", "");
+  return HASH_ROUTES.has(h) ? h : "home";
+};
+
+/* Bridges AccountPage (legacy phone/password-shaped `user`) onto the live
+   OTP session from AuthContext, since AccountPage is otherwise only ever
+   reachable through the old, now-unused phone/password login flow. Must be
+   its own component (rendered inside <AuthProvider>) so it can call useAuth() —
+   App itself renders the provider and can't consume its own context. */
+function AccountRoute({ user, setUser, initialTab, ...pageProps }) {
+  const { isLoggedIn, account, setAccount } = useAuth();
+
+  if (!isLoggedIn) {
+    return (
+      <div className="container page pt-[50px]">
+        <div className="empty">נא להתחבר תחילה.</div>
+      </div>
+    );
+  }
+
+  const mergedUser = {
+    phone: "",
+    city: "",
+    ...user,
+    name: account?.name || user?.name || "משתמשת",
+    email: account?.email || user?.email || "",
+  };
+
+  const setMergedUser = (updated) => {
+    setUser(updated);
+    setAccount((prev) => ({ ...(prev || {}), name: updated.name, email: updated.email }));
+  };
+
+  return <AccountPage user={mergedUser} setUser={setMergedUser} initialTab={initialTab} {...pageProps} />;
+}
+
+/* Route-level guard for /publish. The click-time gate (navbar CTA, Footer
+   link) already routes signed-out clicks to the auth modal instead of here,
+   but the route itself is otherwise unprotected — this covers anyone who
+   still lands on "publish" some other way (back/forward navigation, a
+   stale link) by bouncing them to the same auth modal rather than showing
+   the form. PublishPage itself is untouched. */
+function PublishRoute(props) {
+  const { isLoggedIn, openAuth } = useAuth();
+
+  useEffect(() => {
+    if (!isLoggedIn) openAuth("publish");
+  }, [isLoggedIn]);
+
+  if (!isLoggedIn) {
+    return (
+      <div className="container page pt-[50px]">
+        <div className="empty">נדרשת התחברות כדי לפרסם שמלה.</div>
+      </div>
+    );
+  }
+
+  return <PublishPage {...props} />;
+}
 
 export default function App() {
   const [route, setRoute] = useState(routeFromHash);
@@ -30,6 +95,7 @@ export default function App() {
   const [favIds, setFavIds] = useLocalStorage("onenight_favs", []);
   const [selected, setSelected] = useState(null);
   const [authMode, setAuthMode] = useState("login");
+  const [accountTab, setAccountTab] = useState("ads");
   const [filters, setFilters] = useState({ ...EMPTY_FILTERS });
   const [toastMsg, toast] = useToast();
 
@@ -46,7 +112,7 @@ export default function App() {
 
   useEffect(() => { reloadDresses(); }, []);
   useEffect(() => {
-    const h = () => { if (routeFromHash() === "admin") setRoute("admin"); };
+    const h = () => { const hr = routeFromHash(); if (HASH_ROUTES.has(hr)) setRoute(hr); };
     window.addEventListener("hashchange", h);
     return () => window.removeEventListener("hashchange", h);
   }, []);
@@ -57,7 +123,7 @@ export default function App() {
   const go = (r) => {
     setRoute(r);
     window.scrollTo({ top: 0 });
-    if (r !== "admin" && location.hash) history.replaceState(null, "", location.pathname);
+    if (!HASH_ROUTES.has(r) && location.hash) history.replaceState(null, "", location.pathname);
   };
 
   const onAuth = (u) => { setUser(u); setRoute("account"); toast("ברוכה הבאה, " + u.name + " 🌸"); };
@@ -83,12 +149,13 @@ export default function App() {
           const hay = (d.title + d.desc + d.color + d.region).toLowerCase();
           if (!hay.includes(q)) return false;
         }
-        if (filters.color && !d.color.includes(filters.color.trim())) return false;
+        if (filters.colors.length && !filters.colors.includes(d.color)) return false;
         if (d.price > filters.maxPrice) return false;
         if (d.price < filters.minPrice) return false;
         if (filters.regions.length && !filters.regions.includes(d.region)) return false;
         if (filters.sizes.length && !filters.sizes.includes(d.size)) return false;
-        if (filters.conditions.length && !filters.conditions.includes(d.condition)) return false;
+        if (filters.dressLengths.length && !filters.dressLengths.includes(d.dressLength)) return false;
+        if (filters.sleeveLengths.length && !filters.sleeveLengths.includes(d.sleeveLength)) return false;
         if (filters.source !== "all" && d.source !== filters.source) return false;
         return true;
       });
@@ -100,12 +167,8 @@ export default function App() {
     <AuthProvider go={go}>
     <div className="min-h-screen bg-canvas font-body text-ink">
       <SiteHeader
-        route={route}
         go={go}
-        user={user}
-        favCount={favIds.length}
-        onLogin={() => { setAuthMode("login"); go("login"); }}
-        onLogout={logout}
+        goAccount={(tab) => { setAccountTab(tab); go("account"); }}
       />
 
       {/* Navbar is fixed; home hero sits behind it, other routes need top clearance */}
@@ -124,8 +187,9 @@ export default function App() {
         />
       )}
 
-      {route === "publish" && <PublishPage onSubmit={publish} goHome={() => go("home")} />}
+      {route === "publish" && <PublishRoute onSubmit={publish} goHome={() => go("home")} />}
       {route === "thankyou" && <ThankYou goHome={() => go("home")} />}
+      {route === "terms" && <TermsPage goHome={() => go("home")} />}
 
       {route === "favorites" && (
         <FavoritesPage dresses={favDresses} favIds={favIds} onFav={toggleFav} onOpen={setSelected} go={go} />
@@ -135,23 +199,19 @@ export default function App() {
         <AuthPage mode={authMode} onAuth={onAuth} goHome={() => go("home")} toast={toast} />
       )}
 
-      {route === "account" && user && (
-        <AccountPage
+      {route === "account" && (
+        <AccountRoute
           user={user}
+          setUser={setUser}
           dresses={dresses}
           setDresses={setDresses}
           favIds={favIds}
           dressById={dressById}
           onOpen={setSelected}
           onFav={toggleFav}
-          setUser={setUser}
           toast={toast}
+          initialTab={accountTab}
         />
-      )}
-      {route === "account" && !user && (
-        <div className="container page pt-[50px]">
-          <div className="empty">נא להתחבר תחילה.</div>
-        </div>
       )}
 
       {route === "admin" && <AdminPage dresses={dresses} setDresses={setDresses} toast={toast} />}

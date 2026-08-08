@@ -1,5 +1,6 @@
 import { useState, useRef, useMemo, useEffect } from "react";
 import { Img } from "../components/ui/Img.jsx";
+import { useAuth } from "../context/AuthContext.jsx";
 
 /* ============================================================================
    ProductPage — full dedicated dress page (mobile-first, RTL).
@@ -190,10 +191,12 @@ function AccordionRow({ title, children, open, onToggle }) {
 
 /* ============================================================== ProductPage */
 export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [], onOpenSimilar }) {
+  const { isLoggedIn, openAuth } = useAuth();
   const [size, setSize] = useState(null);
   const [range, setRange] = useState({ start: null, end: null });
   const [openAcc, setOpenAcc] = useState(0);
   const [sizeGuide, setSizeGuide] = useState(false);
+  const [authPrompt, setAuthPrompt] = useState(false);
 
   useEffect(() => { window.scrollTo?.({ top: 0 }); }, [d?.id]);
 
@@ -215,22 +218,30 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
     });
   };
 
-  /* availability indicator — dynamic on the selected range */
-  const hasRange = range.start && range.end;
-  const conflict = hasRange && rangeKeys(range.start, range.end).some((k) => booked.includes(k));
-  const availability = !hasRange
+  /* availability indicator — dynamic on the selected range.
+     A single clicked day (no end date chosen yet) is a valid same-day
+     rental on its own; a second click on a later day extends it into a
+     multi-day range. Either way `end` defaults to `start`. */
+  const hasDates = Boolean(range.start);
+  const effectiveEnd = range.end || range.start;
+  const conflict = hasDates && rangeKeys(range.start, effectiveEnd).some((k) => booked.includes(k));
+  const availability = !hasDates
     ? { tone: "neutral", text: "בחרי תאריכים כדי לבדוק זמינות" }
     : conflict
       ? { tone: "no", text: "לא פנויה" }
       : { tone: "yes", text: "פנויה לתאריכים שבחרת" };
 
-  const canBook = !!size && hasRange && !conflict;
+  const canBook = !!size && hasDates && !conflict;
 
   const book = () => {
     if (!canBook) return;
-    const datePhrase = ` לתאריכים ${rangeSummary(range.start, range.end)}`;
+    if (!isLoggedIn) {
+      setAuthPrompt(true);
+      return;
+    }
+    const datePhrase = ` לתאריכים ${rangeSummary(range.start, effectiveEnd)}`;
     const wa = `https://wa.me/972${(d.phone || "").replace(/^0/, "")}?text=${encodeURIComponent(
-      `היי! אשמח להזמין את השמלה "${d.title}" במידה ${size}${datePhrase} ב-onenight 🌸`
+      `היי! אשמח להזמין את השמלה "${d.title}" במידה ${size}${datePhrase} דרך-onenight \u{1F337}`
     )}`;
     window.open(wa, "_blank", "noopener");
     toast && toast("פותחים את בקשת ההזמנה 🌸");
@@ -294,7 +305,6 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
           </AccordionRow>
           <AccordionRow title="מדיניות השכרה" open={openAcc === 1} onToggle={() => setOpenAcc(openAcc === 1 ? -1 : 1)}>
             <p>איסוף השמלה מתואם ישירות מול בעלת השמלה לאחר אישור ההזמנה. ההחזרה עד השעה 20:00 ביום שלאחר תום תקופת ההשכרה.</p>
-            <p>איחור בהחזרה כרוך בחיוב של 15% מדמי ההשכרה לכל יום.</p>
           </AccordionRow>
           <AccordionRow title="מדיניות ביטול" open={openAcc === 2} onToggle={() => setOpenAcc(openAcc === 2 ? -1 : 2)}>
             <p>ביטול עד 7 ימים לפני מועד ההשכרה — ללא עלות. ביטול בטווח של 3–7 ימים — חיוב של 50%. ביטול ב-48 השעות האחרונות — חיוב מלא.</p>
@@ -370,6 +380,109 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
               </tbody>
             </table>
             <p className="op-modal-note">במקרה של התלבטות בין שתי מידות, מומלץ לבחור את הגדולה מביניהן.</p>
+          </div>
+        </div>
+      )}
+
+      {/* auth gate — shown instead of the WhatsApp flow for signed-out users.
+          Styled to match AuthContext's own modal exactly (same dark-glass
+          card, bordeaux/rose/cream palette, Assistant body copy) rather
+          than this page's own fuchsia/white modal system, since this is
+          effectively a preview step for that same modal. */}
+      {authPrompt && (
+        <div
+          onClick={() => setAuthPrompt(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 150,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+            background: "rgba(0,0,0,0.4)",
+            backdropFilter: "blur(4px)",
+            WebkitBackdropFilter: "blur(4px)",
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="נדרשת הרשמה"
+            dir="rtl"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "relative",
+              width: "100%",
+              maxWidth: "320px",
+              padding: "36px 28px",
+              textAlign: "center",
+              color: "#fff",
+              background: "rgba(42, 31, 31, 0.75)",
+              backdropFilter: "blur(24px)",
+              WebkitBackdropFilter: "blur(24px)",
+              border: "1px solid rgba(196, 160, 160, 0.2)",
+              borderRadius: "20px",
+              boxShadow: "0 16px 48px rgba(0, 0, 0, 0.25)",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setAuthPrompt(false)}
+              aria-label="סגירה"
+              style={{
+                position: "absolute",
+                top: "16px",
+                left: "16px",
+                background: "transparent",
+                border: "none",
+                padding: "2px",
+                color: "rgba(255,255,255,0.5)",
+                cursor: "pointer",
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
+            </button>
+
+            {/* same lock glyph the auth modal opens on */}
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#C4A0A0" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block", margin: "0 auto 20px" }}>
+              <rect x="5" y="11" width="14" height="10" rx="2" />
+              <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+            </svg>
+
+            <h3 style={{ fontFamily: "'Frank Ruhl Libre','Cormorant Garamond',serif", fontStyle: "italic", fontWeight: 500, fontSize: "1.3rem", color: "#fff", margin: 0 }}>
+              כמעט שם
+            </h3>
+            <p style={{ fontFamily: "'Assistant',sans-serif", marginTop: "10px", fontSize: "0.85rem", lineHeight: 1.6, color: "rgba(255,255,255,0.65)" }}>
+              לצורך אימות וקבלת הפרטים, יש להירשם — זה לוקח בדיוק דקה.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => {
+                setAuthPrompt(false);
+                openAuth();
+              }}
+              style={{
+                marginTop: "24px",
+                width: "100%",
+                borderRadius: "999px",
+                padding: "12px 0",
+                fontFamily: "'Assistant',sans-serif",
+                fontSize: "0.95rem",
+                color: "#fff",
+                background: "#6B2D2D",
+                border: "none",
+                cursor: "pointer",
+                transition: "background-color 0.2s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#5A2424"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#6B2D2D"; }}
+            >
+              המשך להרשמה או התחברות
+            </button>
           </div>
         </div>
       )}

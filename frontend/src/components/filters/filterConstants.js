@@ -25,18 +25,23 @@ export const SOURCE_OPTIONS = [
   ["שם חנות", "בוטיק / חנות"],
 ];
 
-/* Price slider bounds (₪). */
-export const PRICE = { min: 50, max: 500, step: 10 };
+/* Dress-length / sleeve-length filter options (short / medium / long). */
+export const DRESS_LENGTH_OPTIONS = ["קצר", "אמצע", "ארוך"];
+export const SLEEVE_LENGTH_OPTIONS = ["קצר", "אמצע", "ארוך"];
+
+/* Price slider bounds (₪) — single draggable range slider, 0 to 1000. */
+export const PRICE = { min: 0, max: 1000, step: 10 };
 
 export const EMPTY_FILTERS = {
   q: "",
-  color: "",
+  colors: [],
   minPrice: PRICE.min,
   maxPrice: PRICE.max,
   regions: [],
   sizes: [],
   lengths: [],
-  conditions: [],
+  dressLengths: [],
+  sleeveLengths: [],
   source: "all",
 };
 
@@ -45,9 +50,10 @@ export function activeFilterCount(f) {
   return (
     f.regions.length +
     f.sizes.length +
-    f.conditions.length +
+    f.colors.length +
+    f.dressLengths.length +
+    f.sleeveLengths.length +
     (f.source !== "all" ? 1 : 0) +
-    (f.color ? 1 : 0) +
     (f.q ? 1 : 0) +
     (f.minPrice > PRICE.min || f.maxPrice < PRICE.max ? 1 : 0)
   );

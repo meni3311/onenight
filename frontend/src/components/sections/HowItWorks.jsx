@@ -23,7 +23,7 @@ const HowIcon = {
 const STEPS = [
   { n: "1", icon: HowIcon.dress, title: "בחרי שמלה", desc: "עיינו בגלריה ובחרו את השמלה שדיברה אליכן" },
   { n: "2", icon: HowIcon.calendar, title: "בדקי זמינות", desc: "בדקו שהשמלה פנויה לתאריך האירוע שלכן" },
-  { n: "3", icon: HowIcon.message, title: "תאמי עם המשכירה", desc: "יצרו קשר ישיר עם בעלת השמלה לתיאום האיסוף" },
+  { n: "3", icon: HowIcon.message, title: "תאמי איסוף", desc: "יצרו קשר ישיר עם בעלת השמלה לתיאום המדידה ואיסוף" },
 ];
 
 /* "איך זה עובד" — three-step glass card that fades up on scroll. */

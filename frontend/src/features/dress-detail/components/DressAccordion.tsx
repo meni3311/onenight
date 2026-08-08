@@ -69,7 +69,6 @@ export function DressAccordion({ dress }: DressAccordionProps): JSX.Element {
 
       <AccordionRow title="מדיניות השכרה" open={openIndex === 1} onToggle={() => toggle(1)}>
         <p>איסוף השמלה מתואם ישירות מול בעלת השמלה לאחר אישור ההזמנה. ההחזרה עד השעה 20:00 ביום שלאחר תום תקופת ההשכרה.</p>
-        <p>איחור בהחזרה כרוך בחיוב של 15% מדמי ההשכרה לכל יום.</p>
       </AccordionRow>
 
       <AccordionRow title="מדיניות ביטול" open={openIndex === 2} onToggle={() => toggle(2)}>
