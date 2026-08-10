@@ -35,8 +35,6 @@ export class CreateDressDto {
 
   @ApiPropertyOptional() @IsOptional() @IsString() color?: string;
 
-  @ApiPropertyOptional() @IsOptional() @IsString() length?: string;
-
   @ApiPropertyOptional() @IsOptional() @IsString() designer?: string;
 
   @ApiProperty({ enum: DressSource }) @IsEnum(DressSource) source!: DressSource;
@@ -54,6 +52,8 @@ export class CreateDressDto {
   @ApiProperty({ enum: SleeveLength })
   @IsEnum(SleeveLength)
   sleeveLength!: SleeveLength;
+
+  @ApiPropertyOptional() @IsOptional() @IsString() city?: string;
 
   @ApiProperty() @IsUUID() ownerId!: string;
 

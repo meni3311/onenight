@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { REGIONS, SIZES, LENGTHS, CONDITIONS, placeholder } from "../lib/data.js";
+import { REGIONS, SIZES, CONDITIONS, placeholder } from "../lib/data.js";
 import { api } from "../lib/api.js";
-import { Calendar } from "../components/calendar/Calendar.jsx";
+import { DressAvailabilityCalendar } from "../components/calendar/DressAvailabilityCalendar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 
 /* Inline edit form for one of the user's dress listings. */
@@ -14,7 +14,6 @@ function EditFields({ d, setD }) {
       <div className="field"><label>צבע</label><input type="text" value={d.color} onChange={(e) => set("color", e.target.value)} /></div>
       <div className="field"><label>מחיר ₪</label><input type="number" value={d.price} onChange={(e) => set("price", +e.target.value)} /></div>
       <div className="field"><label>מצב</label><select value={d.condition} onChange={(e) => set("condition", e.target.value)}>{CONDITIONS.map((c) => <option key={c}>{c}</option>)}</select></div>
-      <div className="field"><label>אורך</label><select value={d.length} onChange={(e) => set("length", e.target.value)}>{LENGTHS.map((c) => <option key={c}>{c}</option>)}</select></div>
       <div className="field"><label>אזור</label><select value={d.region} onChange={(e) => set("region", e.target.value)}>{REGIONS.map((c) => <option key={c}>{c}</option>)}</select></div>
       <div className="field"><label>מידה</label><select value={d.size} onChange={(e) => set("size", e.target.value)}>{SIZES.map((c) => <option key={c}>{c}</option>)}</select></div>
     </div>
@@ -22,11 +21,12 @@ function EditFields({ d, setD }) {
 }
 
 const STATUS_LABELS = { approved: "מאושרת", pending: "ממתינה", rejected: "נדחתה" };
-const TABS = [["ads", "המודעות שלי"], ["cal", "יומן זמינות"], ["account", "פרטי חשבון"]];
+const TABS = [["ads", "המודעות שלי"], ["account", "פרטי חשבון"]];
 
-/* Signed-in user's area: their listings, availability calendars, and
-   editable account details. Favorites live on their own page, reached
-   via "המועדפים שלי" in the personal-area dropdown — not a tab here. */
+/* Signed-in user's area: their listings (each with its own inline edit
+   flow, availability calendar included) and editable account details.
+   Favorites live on their own page, reached via "המועדפים שלי" in the
+   personal-area dropdown — not a tab here. */
 export default function AccountPage({ user, dresses, setDresses, onOpen, setUser, toast, initialTab }) {
   const { requestPublish } = useAuth();
   const [tab, setTab] = useState(initialTab || "ads");
@@ -48,7 +48,7 @@ export default function AccountPage({ user, dresses, setDresses, onOpen, setUser
     try {
       const updated = await api("/api/dresses/" + editing.id, { method: "PATCH", body: {
         title: editing.title, desc: editing.desc, color: editing.color, price: +editing.price,
-        condition: editing.condition, length: editing.length, region: editing.region, size: editing.size,
+        condition: editing.condition, region: editing.region, size: editing.size,
       } });
       setDresses((p) => p.map((d) => (d.id === updated.id ? updated : d)));
       setEditing(null); toast("הפרטים עודכנו ✓");
@@ -70,35 +70,41 @@ export default function AccountPage({ user, dresses, setDresses, onOpen, setUser
       </div>
 
       {tab === "ads" && (myAds.length ? myAds.map((d) => (
-        <div key={d.id} className="admin-row">
+        <div key={d.id} className="admin-row owner-row">
           <img src={d.images[0]} alt="" onError={(e) => (e.target.src = placeholder(d.colorHex, d.title))} />
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2.5">
               <strong className="serif text-[20px]">{d.title}</strong>
               <span className={"status-pill status-" + d.status}>{STATUS_LABELS[d.status]}</span>
             </div>
             <div className="card-meta">מידה {d.size} · {d.region} · {d.price} ₪</div>
             {editing && editing.id === d.id ? <EditFields d={editing} setD={setEditing} /> :
-              <div className="mt-2.5 flex gap-2">
+              <div className="mt-2.5 flex flex-wrap gap-2 [&>*]:flex-1">
                 <button className="btn btn-ghost" onClick={() => setEditing(d)}>✏️ עריכה</button>
                 <button className="btn btn-ghost" onClick={() => onOpen(d)}>תצוגה</button>
               </div>}
-            {editing && editing.id === d.id && <div className="mt-2.5 flex gap-2">
+            {editing && editing.id === d.id && <div className="mt-2.5 flex flex-wrap gap-2 [&>*]:flex-1">
               <button className="btn btn-sage" onClick={saveEdit}>שמירה</button>
               <button className="btn btn-ghost" onClick={() => setEditing(null)}>ביטול</button>
             </div>}
+            {editing && editing.id === d.id && (
+              /* Availability calendar for this specific dress, scoped by
+                 `d.id` straight from this row's own context — no dress
+                 selector, since we're already inside that dress's edit
+                 flow. Reads/writes `d.booked` (the live dresses-state
+                 object, not the `editing` draft) so it reflects toggles
+                 immediately; each toggle PATCHes independently of the
+                 "שמירה" button, same as before. */
+              <div className="mt-4 border-t border-[var(--border)] pt-3">
+                <p className="text-[13px] font-semibold text-[var(--text)]">יומן זמינות</p>
+                <p className="mx-0 mb-2.5 mt-1 text-[13px] text-[var(--muted)]">סמני תאריכים שבהן השמלה אינה זמינה</p>
+                <DressAvailabilityCalendar booked={d.booked} onToggle={(k) => toggleDate(d.id, k)} />
+              </div>
+            )}
             <p className="mt-2 text-[12px] text-[var(--muted)]">לשינוי תמונה יש לפנות לשירות לקוחות</p>
           </div>
         </div>
       )) : <div className="empty">עדיין אין לך מודעות. <span className="link-rose" onClick={requestPublish}>פרסמי שמלה ראשונה</span></div>)}
-
-      {tab === "cal" && (myAds.length ? myAds.map((d) => (
-        <div key={d.id} className="mb-6">
-          <strong className="serif text-[19px]">{d.title}</strong>
-          <p className="mx-0 mb-2.5 mt-1 text-[13px] text-[var(--muted)]">סמני תאריכים שבהם השמלה אינה זמינה</p>
-          <div className="max-w-[320px]"><Calendar booked={d.booked} editable onToggle={(k) => toggleDate(d.id, k)} /></div>
-        </div>
-      )) : <div className="empty">אין מודעות להצגת יומן.</div>)}
 
       {tab === "account" && <div className="form-card m-0 max-w-[440px]">
         <div className="field mb-[14px]"><label>שם מלא</label><input type="text" value={user.name} onChange={(e) => setUser({ ...user, name: e.target.value })} /></div>

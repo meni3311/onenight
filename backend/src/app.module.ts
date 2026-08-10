@@ -7,6 +7,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { DressesModule } from './dresses/dresses.module';
 import { UsersModule } from './users/users.module';
 import { AuthOtpModule } from './auth-otp/auth-otp.module';
+import { BookingInquiriesModule } from './booking-inquiries/booking-inquiries.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { AuthOtpModule } from './auth-otp/auth-otp.module';
     DressesModule,
     UsersModule,
     AuthOtpModule,
+    BookingInquiriesModule,
   ],
 })
 export class AppModule {}

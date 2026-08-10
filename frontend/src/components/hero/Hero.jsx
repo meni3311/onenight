@@ -31,11 +31,18 @@ export function Hero({ onBrowse }) {
         </h1>
       </div>
 
-      {/* Glassmorphism CTAs — vertically centered, stacked & centered */}
+      {/* Glassmorphism CTAs — vertically centered on desktop (md+), stacked &
+          centered. On mobile, vh-based centering is unreliable: the browser
+          chrome (address bar etc.) makes 100vh taller than the visible
+          viewport on many phones, so a vertically-centered box can land high
+          enough to overlap the top-anchored headline above. Mobile instead
+          anchors the button box a fixed distance from the top (like the
+          headline itself), which keeps a consistent gap below the text
+          regardless of viewport-height quirks. Desktop keeps the original
+          centered layout; there's ample room there already. */}
       <div
         dir="ltr"
-        style={{ paddingTop: "100px" }}
-        className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-3"
+        className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-3 md:pt-[100px] [@media(max-width:767px)]:top-[350px] [@media(max-width:767px)]:translate-y-0"
       >
         <button
           type="button"

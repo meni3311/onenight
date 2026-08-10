@@ -15,8 +15,11 @@ export const COLOR_SWATCHES = [
   { name: "סגול", hex: "#5E4B79" },
 ];
 
-/* Letter sizes only — numeric sizes are intentionally omitted from the filter UI. */
-export const LETTER_SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
+/* Letter sizes only — numeric sizes are intentionally omitted from the filter UI.
+   "אחר" is included since dresses can be listed under that size too (see
+   SIZES in lib/data.js — the two lists are separate on purpose, not a
+   duplication: this one deliberately excludes numeric sizes). */
+export const LETTER_SIZES = ["XS", "S", "M", "L", "XL", "XXL", "אחר"];
 
 /* Source filter options: [value, label]. "הכל" (all) is the default. */
 export const SOURCE_OPTIONS = [
@@ -39,7 +42,6 @@ export const EMPTY_FILTERS = {
   maxPrice: PRICE.max,
   regions: [],
   sizes: [],
-  lengths: [],
   dressLengths: [],
   sleeveLengths: [],
   source: "all",

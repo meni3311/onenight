@@ -35,12 +35,12 @@ export class DressDetailDto {
   @ApiProperty() price!: number;
   @ApiProperty({ nullable: true, type: String }) fabric!: string | null;
   @ApiProperty({ nullable: true, type: String }) color!: string | null;
-  @ApiProperty({ nullable: true, type: String }) length!: string | null;
   @ApiProperty({ nullable: true, type: String }) designer!: string | null;
   @ApiProperty({ enum: DressSource }) source!: DressSource;
   @ApiProperty({ enum: DressCondition }) condition!: DressCondition;
   @ApiProperty({ enum: DressLength }) dressLength!: DressLength;
   @ApiProperty({ enum: SleeveLength }) sleeveLength!: SleeveLength;
+  @ApiProperty({ nullable: true, type: String }) city!: string | null;
   @ApiProperty({ type: [DressSizeDto] }) sizes!: DressSizeDto[];
   @ApiProperty({ type: [DressImageDto] }) images!: DressImageDto[];
   @ApiProperty({ type: [ReviewDto] }) reviews!: ReviewDto[];
@@ -63,6 +63,7 @@ export class DressListItemDto {
   @ApiProperty({ enum: DressSource }) source!: DressSource;
   @ApiProperty({ enum: DressLength }) dressLength!: DressLength;
   @ApiProperty({ enum: SleeveLength }) sleeveLength!: SleeveLength;
+  @ApiProperty({ nullable: true, type: String }) city!: string | null;
   @ApiProperty({ type: [DressImageDto] }) images!: DressImageDto[];
 }
 

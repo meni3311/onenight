@@ -1,6 +1,7 @@
 import { useState, useRef, useMemo, useEffect } from "react";
 import { Img } from "../components/ui/Img.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useBodyScrollLock } from "../hooks/useBodyScrollLock.js";
 
 /* ============================================================================
    ProductPage — full dedicated dress page (mobile-first, RTL).
@@ -191,12 +192,25 @@ function AccordionRow({ title, children, open, onToggle }) {
 
 /* ============================================================== ProductPage */
 export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [], onOpenSimilar }) {
-  const { isLoggedIn, openAuth } = useAuth();
+  const { isLoggedIn, account, openAuth } = useAuth();
   const [size, setSize] = useState(null);
   const [range, setRange] = useState({ start: null, end: null });
   const [openAcc, setOpenAcc] = useState(0);
   const [sizeGuide, setSizeGuide] = useState(false);
   const [authPrompt, setAuthPrompt] = useState(false);
+
+  /* App.jsx renders ProductPage *alongside* the home grid (App.jsx keeps
+     `route === "home"` mounted underneath `{selected && <ProductPage/>}`)
+     rather than swapping it out — .op-root's position:fixed only covers
+     that content visually. Without this, body stays tall/scrollable behind
+     the overlay, and the browser draws its native scrollbar for that
+     hidden body scroll at the viewport edge (fixed positioning can't hide
+     browser-chrome scrollbars), which read as a stray grey scrollbar on
+     the left. useBodyScrollLock is the same hook the auth modal and mobile
+     nav already use — this mirrors what the old DetailModal this page
+     "replaces entirely" (see file header) used to do, which the migration
+     dropped. */
+  useBodyScrollLock(true);
 
   useEffect(() => { window.scrollTo?.({ top: 0 }); }, [d?.id]);
 
@@ -233,12 +247,37 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
 
   const canBook = !!size && hasDates && !conflict;
 
+  /* Fire-and-forget: logs this click for the admin's booking-inquiries
+     page (see backend/src/booking-inquiries). Deliberately doesn't await
+     or block on this — a failed/slow log must never delay or break the
+     WhatsApp flow below, which is the actual user-facing behavior and is
+     untouched. Goes straight to the real backend via fetch(), same as
+     AuthContext's calls — this doesn't exist in the mock lib/api.js router
+     (dresses/admin there are mock-only; this is real, persisted data). */
+  const logBookingInquiry = () => {
+    if (!account?.id) return; // isLoggedIn is already required to reach this point; belt-and-suspenders
+    fetch("/api/booking-inquiries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        renterId: account.id,
+        renterPhone: account.phone || "",
+        dressId: d.id,
+        dressTitle: d.title,
+        ownerPhone: d.phone || "",
+        selectedStartDate: range.start,
+        selectedEndDate: effectiveEnd,
+      }),
+    }).catch(() => { /* logging failure shouldn't surface to the renter */ });
+  };
+
   const book = () => {
     if (!canBook) return;
     if (!isLoggedIn) {
       setAuthPrompt(true);
       return;
     }
+    logBookingInquiry();
     const datePhrase = ` לתאריכים ${rangeSummary(range.start, effectiveEnd)}`;
     const wa = `https://wa.me/972${(d.phone || "").replace(/^0/, "")}?text=${encodeURIComponent(
       `היי! אשמח להזמין את השמלה "${d.title}" במידה ${size}${datePhrase} דרך-onenight \u{1F337}`
@@ -300,23 +339,26 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
             {d.desc && <p>{d.desc}</p>}
             <p>צבע: {d.color || "—"}</p>
             <p>מקור: {sellerLabel}</p>
-            <p>אורך: {d.length || "—"}</p>
             <p>מצב: {d.condition || "—"}</p>
+            <p>אזור: {d.region || "—"}</p>
+            <p>עיר: {d.city || "—"}</p>
           </AccordionRow>
           <AccordionRow title="מדיניות השכרה" open={openAcc === 1} onToggle={() => setOpenAcc(openAcc === 1 ? -1 : 1)}>
             <p>איסוף השמלה מתואם ישירות מול בעלת השמלה לאחר אישור ההזמנה. ההחזרה עד השעה 20:00 ביום שלאחר תום תקופת ההשכרה.</p>
           </AccordionRow>
           <AccordionRow title="מדיניות ביטול" open={openAcc === 2} onToggle={() => setOpenAcc(openAcc === 2 ? -1 : 2)}>
-            <p>ביטול עד 7 ימים לפני מועד ההשכרה — ללא עלות. ביטול בטווח של 3–7 ימים — חיוב של 50%. ביטול ב-48 השעות האחרונות — חיוב מלא.</p>
+            <p>מול המשכירה.</p>
           </AccordionRow>
           <AccordionRow title="שאלות ותשובות" open={openAcc === 3} onToggle={() => setOpenAcc(openAcc === 3 ? -1 : 3)}>
             <p><strong>אפשר למדוד לפני?</strong> כן, אפשר לתאם מדידה מול בעלת השמלה.</p>
-            <p><strong>מי אחראית על הניקוי?</strong> השמלה נמסרת נקייה ומוחזרת לאחר ניקוי יבש.</p>
+            <p><strong>מי אחראית על הניקוי?</strong> השמלה נמסרת נקייה ומוחזרת לאחר נקיה למראה. כתמים חריגים יחוייבו בניקוי יבש.</p>
             <p><strong>יש פיקדון?</strong> ייתכן פיקדון קטן שנקבע מול בעלת השמלה ומוחזר בעת ההחזרה.</p>
           </AccordionRow>
         </section>
 
-        {/* SECTION 6 — reviews */}
+        {/* SECTION 6 — reviews — REMOVED (deferred feature, see below near
+            the REVIEWS const for details). Re-enable by uncommenting this
+            block; nothing else references it.
         <section className="op-sec op-sec--reviews op-anim" style={{ animationDelay: "400ms" }}>
           <h2 className="op-h2">מה אמרו עליה</h2>
           <div className="op-reviews">
@@ -332,6 +374,7 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
             ))}
           </div>
         </section>
+        */}
 
         {/* SECTION 7 — similar */}
         {similar.length > 0 && (
@@ -490,12 +533,18 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
   );
 }
 
-/* sample reviews (presentational — the data model has no reviews yet) */
+/* Reviews UI removed (deferred feature — see SECTION 6 above, commented out).
+   This sample data was always presentational only: the real Review model
+   (backend/prisma/schema.prisma) exists but has no NestJS controller/service
+   wired to it yet, and nothing in this app ever fetched real reviews — so
+   there's no live data to preserve here, just this hardcoded array. Left
+   commented rather than deleted so re-enabling SECTION 6 is a pure uncomment.
 const REVIEWS = [
   { name: "נועה ל.", stars: 5, size: "M", text: "השמלה הייתה מושלמת, בדיוק כמו בתמונות. קיבלתי המון מחמאות בערב." },
   { name: "שיר כ.", stars: 5, size: "S", text: "איכות מדהימה והתהליך היה פשוט וזורם. אשכיר שוב בשמחה." },
   { name: "דנה מ.", stars: 4, size: "L", text: "שמלה יפהפייה ונוחה. הגיעה נקייה ומגוהצת, מומלץ בחום." },
 ];
+*/
 
 /* ------------------------------------------------------------------- CSS */
 const CSS = `
@@ -503,7 +552,8 @@ const CSS = `
 
 .op-root{position:fixed;inset:0;z-index:120;direction:rtl;background:${C.cream};
   font-family:${UI};color:${C.ink};display:flex;flex-direction:column;}
-.op-scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.op-scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;-ms-overflow-style:none;}
+.op-scroll::-webkit-scrollbar{display:none;width:0;height:0;}
 .op-root *{box-sizing:border-box;}
 
 /* entrance + stagger */
@@ -560,7 +610,7 @@ const CSS = `
   font-family:${UI};font-size:12px;color:${C.fuchsia};text-decoration:underline;}
 
 /* SECTION 4 — calendar */
-.op-cal{max-width:360px;}
+.op-cal{max-width:360px;margin:0 auto;}
 .op-cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
 .op-cal-title{font-family:${SERIF};font-size:18px;color:${C.ink};}
 .op-cal-nav{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;
@@ -588,7 +638,9 @@ const CSS = `
 .op-acc-inner p{margin:0 0 8px;}
 .op-acc-inner strong{color:${C.ink};font-weight:600;}
 
-/* SECTION 6 — reviews */
+/* SECTION 6 — reviews — rules unused now that the markup above is
+   commented out (deferred feature); left in place, commented, for a clean
+   re-enable rather than deleted.
 .op-sec--reviews{background:#FAFAFA;}
 .op-reviews{display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;
   margin:0 -24px;padding:0 24px 4px;-webkit-overflow-scrolling:touch;}
@@ -602,6 +654,7 @@ const CSS = `
 .op-review-text{font-family:${UI};font-size:13px;color:${C.subtle};line-height:1.7;margin:0 0 12px;}
 .op-review-size{display:inline-block;font-family:${UI};font-size:11px;color:${C.subtle};
   background:${C.cream};border-radius:999px;padding:4px 10px;}
+*/
 
 /* SECTION 7 — similar */
 .op-similar{display:flex;gap:14px;overflow-x:auto;margin:0 -24px;padding:0 24px 4px;-webkit-overflow-scrolling:touch;}

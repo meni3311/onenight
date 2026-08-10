@@ -97,6 +97,10 @@ export default function App() {
   const [authMode, setAuthMode] = useState("login");
   const [accountTab, setAccountTab] = useState("ads");
   const [filters, setFilters] = useState({ ...EMPTY_FILTERS });
+  /* null = no sort applied (default) — there's no enforced sort today either;
+     the array order is just insertion order (SEED order, with newly
+     published dresses prepended), so this doesn't change existing behavior. */
+  const [sort, setSort] = useState(null);
   const [toastMsg, toast] = useToast();
 
   const reloadDresses = async () => {
@@ -161,6 +165,16 @@ export default function App() {
       });
   }, [dresses, filters]);
 
+  const sorted = useMemo(() => {
+    if (!sort) return visible;
+    const arr = [...visible];
+    if (sort === "price_asc") arr.sort((a, b) => a.price - b.price);
+    else if (sort === "price_desc") arr.sort((a, b) => b.price - a.price);
+    else if (sort === "newest") arr.sort((a, b) => b.createdAt - a.createdAt);
+    else if (sort === "oldest") arr.sort((a, b) => a.createdAt - b.createdAt);
+    return arr;
+  }, [visible, sort]);
+
   const favDresses = favIds.map(dressById).filter(Boolean);
 
   return (
@@ -179,8 +193,11 @@ export default function App() {
           go={go}
           filters={filters}
           setFilters={setFilters}
+          sort={sort}
+          setSort={setSort}
           loading={loading}
-          dresses={visible}
+          dresses={sorted}
+          allDresses={dresses}
           favIds={favIds}
           onFav={toggleFav}
           onOpen={setSelected}
@@ -214,7 +231,9 @@ export default function App() {
         />
       )}
 
-      {route === "admin" && <AdminPage dresses={dresses} setDresses={setDresses} toast={toast} />}
+      {route === "admin" && (
+        <AdminPage dresses={dresses} setDresses={setDresses} toast={toast} dressById={dressById} onOpen={setSelected} />
+      )}
 
       {selected && (
         <ProductPage

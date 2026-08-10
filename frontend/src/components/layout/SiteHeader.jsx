@@ -225,12 +225,12 @@ export function SiteHeader({ go, goAccount }) {
           >
             <span
               dir="ltr"
-              className="font-display text-[26px] font-medium italic lowercase tracking-tight"
+              className="font-display text-[26px] font-medium italic tracking-tight"
               style={{ color: BORDEAUX }}
             >
-              onenight
+              oneNight
             </span>
-            <span className="mt-0.5 font-body text-[11px] font-medium tracking-[0.22em] text-muted">
+            <span className="mt-0.5 font-body text-[11px] font-medium tracking-[0.22em] text-muted" style={{ color: BORDEAUX }}>
               השכרת שמלות ערב
             </span>
           </button>

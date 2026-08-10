@@ -63,7 +63,6 @@ export function DressAccordion({ dress }: DressAccordionProps): JSX.Element {
         <p>בד: {dress.fabric ?? '—'}</p>
         <p>צבע: {dress.color ?? '—'}</p>
         <p>מעצב: {dress.designer ?? '—'}</p>
-        <p>אורך: {dress.length ?? '—'}</p>
         <p>מצב: {CONDITION_LABELS[dress.condition]}</p>
       </AccordionRow>
 
@@ -72,12 +71,12 @@ export function DressAccordion({ dress }: DressAccordionProps): JSX.Element {
       </AccordionRow>
 
       <AccordionRow title="מדיניות ביטול" open={openIndex === 2} onToggle={() => toggle(2)}>
-        <p>ביטול עד 7 ימים לפני מועד ההשכרה — ללא עלות. ביטול בטווח של 3–7 ימים — חיוב של 50%. ביטול ב-48 השעות האחרונות — חיוב מלא.</p>
+        <p>מול המשכירה.</p>
       </AccordionRow>
 
       <AccordionRow title="שאלות ותשובות" open={openIndex === 3} onToggle={() => toggle(3)}>
         <p>אפשר למדוד לפני? כן, ניתן לתאם מדידה מול בעלת השמלה.</p>
-        <p>מי אחראית על הניקוי? השמלה נמסרת נקייה ומוחזרת לאחר ניקוי יבש.</p>
+        <p>מי אחראית על הניקוי? השמלה נמסרת נקייה ומוחזרת לאחר נקיה למראה. כתמים חריגים יחוייבו בניקוי יבש.</p>
         <p>יש פיקדון? ייתכן פיקדון קטן שנקבע מול בעלת השמלה ומוחזר בעת ההחזרה.</p>
       </AccordionRow>
     </section>

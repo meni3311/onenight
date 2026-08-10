@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
 import { Icon } from "../components/ui/Icon.jsx";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock.js";
+import { useLocalStorage } from "../hooks/useLocalStorage.js";
 
 const BORDEAUX = "#6B2D2D";
 const OTP_LENGTH = 6;
@@ -158,6 +159,40 @@ function NoticeLine({ message }) {
   );
 }
 
+/* Login's in-card status slot — swaps in for the form while the request is
+   in flight, then again on success, before the modal closes. No boxed
+   background here (that was a mismatched white/cream card against the
+   modal's own dark glass) — sits directly on the modal's existing
+   background like every other view (form, choice, etc. below), just with
+   text colors matching the modal's own white/rose palette instead of the
+   dark-on-cream pairing that needed the box to stay readable. The bordeaux
+   spinner ring is still the brand accent color, per spec — it just isn't
+   sitting inside its own frame anymore. */
+function LoginStatusCard({ stage }) {
+  const loading = stage === "loading";
+  return (
+    <div
+      className="flex flex-col items-center font-body"
+      style={{ gap: "14px", padding: "26px 0" }}
+    >
+      {loading ? (
+        <>
+          <span className="auth-spinner" aria-hidden="true" />
+          <p style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.75)" }}>מתחברת…</p>
+        </>
+      ) : (
+        <>
+          <div style={{ fontSize: "1.8rem" }}>🌸</div>
+          <h3 style={{ fontSize: "1.15rem", fontWeight: 700, color: "#fff", margin: 0 }}>
+            ברוכה הבאה!
+          </h3>
+          <p style={{ fontSize: "0.82rem", color: "rgba(255,255,255,0.65)", margin: 0 }}>התחברת בהצלחה</p>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* Text-link style shared by "לא קיבלתי קוד" / "שכחתי סיסמה". */
 function TextLink({ onClick, children, center }) {
   return (
@@ -205,11 +240,17 @@ function Checkbox({ checked, onChange, error, children }) {
 }
 
 export function AuthProvider({ go, children }) {
-  /* Simulated session — flips to true once login/registration succeeds. */
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  /* Simulated session — flips to true once login/registration succeeds.
+     Persisted to localStorage (read synchronously on mount, same as
+     `favIds`/the legacy `user` state — see useLocalStorage) so a page
+     refresh doesn't drop the session. There's no bearer token in this app
+     (the mock/real login endpoints just return { name, email }, nothing
+     else checks a token on requests), so `isLoggedIn` + `account` together
+     *are* the session — persisting them is the fix, not a separate token. */
+  const [isLoggedIn, setIsLoggedIn] = useLocalStorage("onenight_logged_in", false);
   /* Signed-in account's display info, captured from the auth flow.
      { name, email } — set on successful login/registration, cleared on logout. */
-  const [account, setAccount] = useState(null);
+  const [account, setAccount] = useLocalStorage("onenight_account", null);
   const [authOpen, setAuthOpen] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   /* What triggered the current auth flow — "publish" if it should land the
@@ -248,6 +289,13 @@ export function AuthProvider({ go, children }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  /* loginForm's own status slot: "form" (default) | "loading" | "success".
+     Swaps the form fields for a spinner, then a welcome confirmation, in
+     the same card — no existing spinner component to reuse (checked:
+     there isn't one anywhere in the app), and the existing welcomeOpen
+     popup below navigates/closes *before* it appears, which is the wrong
+     order for "show welcome, then navigate". */
+  const [loginStage, setLoginStage] = useState("form");
 
   useBodyScrollLock(authOpen || welcomeOpen);
 
@@ -276,6 +324,7 @@ export function AuthProvider({ go, children }) {
     setBusy(false);
     setError("");
     setNotice("");
+    setLoginStage("form");
   };
 
   const openAuth = (intent = null) => { resetFlow(); setAuthIntent(intent); setAuthOpen(true); };
@@ -288,6 +337,7 @@ export function AuthProvider({ go, children }) {
     setError("");
     setNotice("");
     setTermsError(false);
+    setLoginStage("form");
     setView(next);
   };
 
@@ -366,7 +416,12 @@ export function AuthProvider({ go, children }) {
     setBusy(true);
     try {
       const user = await postJson("/api/auth/verify-registration", { email: email.trim(), code: otp });
-      setAccount({ name: user.name, email: user.email });
+      // id + phone: the backend's response already includes both (see
+      // UsersService.strip — everything but the password hash), they just
+      // weren't being kept before. Needed so features like the booking
+      // inquiry log can identify/contact the logged-in renter without a
+      // second round trip.
+      setAccount({ name: user.name, email: user.email, id: user.id, phone: user.phone });
       setIsLoggedIn(true);
       closeAuth();
       // Only the publish flow forces a navigation — every other caller
@@ -388,13 +443,22 @@ export function AuthProvider({ go, children }) {
     if (!password) { setError("נא להזין סיסמה"); return; }
     setError("");
     setBusy(true);
+    setLoginStage("loading");
     try {
       const user = await postJson("/api/auth/login", { email: email.trim(), password });
-      setAccount({ name: user.name, email: user.email });
+      // id + phone: see the matching comment in finishRegisterVerify above.
+      setAccount({ name: user.name, email: user.email, id: user.id, phone: user.phone });
       setIsLoggedIn(true);
-      closeAuth();
+      setLoginStage("success");
+      // Hold the welcome confirmation on screen briefly before navigating —
+      // requirement is spinner → welcome → *then* the app, in that order.
+      setTimeout(() => {
+        closeAuth();
+        if (authIntent === "publish") go("publish");
+      }, 1400);
     } catch (e) {
       setError(e.message);
+      setLoginStage("form");
     } finally {
       setBusy(false);
     }
@@ -452,6 +516,9 @@ export function AuthProvider({ go, children }) {
   const renderView = () => {
     switch (view) {
       case "loginForm":
+        if (loginStage === "loading" || loginStage === "success") {
+          return <LoginStatusCard stage={loginStage} />;
+        }
         return (
           <>
             <BackArrow onClick={() => goView("choice", "back")} />
@@ -744,6 +811,16 @@ export function AuthProvider({ go, children }) {
           @keyframes authBack { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
           .auth-input:focus, .auth-otp:focus { border-color: #C4A0A0 !important; outline: none; }
           .auth-input::placeholder { color: rgba(255,255,255,0.4); }
+          @keyframes authSpin { to { transform: rotate(360deg); } }
+          .auth-spinner {
+            display: block;
+            width: 34px;
+            height: 34px;
+            border: 3px solid rgba(107, 45, 45, 0.2);
+            border-top-color: #6B2D2D;
+            border-radius: 50%;
+            animation: authSpin 0.7s linear infinite;
+          }
         `}</style>
 
         <div

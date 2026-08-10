@@ -42,12 +42,12 @@ export interface DressDetail {
   price: number;
   fabric: string | null;
   color: string | null;
-  length: string | null;
   designer: string | null;
   source: DressSourceValue;
   condition: DressConditionValue;
   dressLength: DressLengthValue;
   sleeveLength: SleeveLengthValue;
+  city: string | null;
   sizes: DressSize[];
   images: DressImage[];
   reviews: Review[];

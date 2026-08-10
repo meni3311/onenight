@@ -63,10 +63,11 @@ model User {
   updatedAt        DateTime @updatedAt
 
   dresses          Dress[]
-  bookingsMade     Booking[]  @relation("renter")
-  bookingsReceived Booking[]  @relation("lister")
-  reviewsWritten   Review[]   @relation("reviewer")
+  bookingsMade     Booking[]        @relation("renter")
+  bookingsReceived Booking[]        @relation("lister")
+  reviewsWritten   Review[]         @relation("reviewer")
   favorites        Favorite[]
+  bookingInquiries BookingInquiry[] @relation("bookingInquiries")
 }
 
 model Dress {
@@ -76,28 +77,29 @@ model Dress {
   price       Float
   fabric      String?
   color       String?
-  length      String?
   designer    String?
   source      DressSource
   condition   DressCondition
-  // `dressLength`/`sleeveLength` are the new structured filter fields (short/
-  // medium/long each). They are intentionally separate from the pre-existing
-  // free-form `length` column above rather than replacing it — the brief
-  // asked only to add these two new fields, not to touch other filter
-  // categories. Flag if `length` should eventually be retired in favor of
-  // `dressLength`.
+  // `dressLength`/`sleeveLength` are the structured length filter fields
+  // (short/medium/long each). The old free-form `length` column that used to
+  // duplicate `dressLength` has been removed — `dressLength` is now the
+  // single source of truth for a dress's length.
   dressLength  DressLength
   sleeveLength SleeveLength
-  ownerId     String
-  owner       User           @relation(fields: [ownerId], references: [id])
-  status      String         @default("pending") // pending | approved | rejected
-  sizes       DressSize[]
-  images      DressImage[]
-  bookings    Booking[]
-  reviews     Review[]
-  favorites   Favorite[]
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  // Free-text city, distinct from `User.city`. Nullable/optional so existing
+  // listings created before this field don't break.
+  city         String?
+  ownerId      String
+  owner        User                @relation(fields: [ownerId], references: [id])
+  status       String              @default("pending") // pending | approved | rejected
+  sizes        DressSize[]
+  images       DressImage[]
+  bookings     Booking[]
+  reviews      Review[]
+  favorites    Favorite[]
+  availability DressAvailability[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
 
   @@index([color])
   @@index([source])
@@ -123,6 +125,22 @@ model DressImage {
   url     String
   order   Int
 
+  @@index([dressId])
+}
+
+// Owner-managed per-day override for a dress's availability. Absence of a
+// row for a given (dressId, date) means available — owners only need to
+// write a row for the days they want to block out, not populate the whole
+// calendar. Not yet read by any renter-facing flow (out of scope for now);
+// this is scoped to the owner's own management UI.
+model DressAvailability {
+  id      String   @id @default(uuid())
+  dress   Dress    @relation(fields: [dressId], references: [id], onDelete: Cascade)
+  dressId String
+  date    DateTime
+  status  String   @default("unavailable") // available | unavailable
+
+  @@unique([dressId, date])
   @@index([dressId])
 }
 
@@ -177,6 +195,44 @@ model Review {
 
   @@index([dressId])
   @@index([reviewerId])
+}
+
+// Logs every click of the dress-detail page's "להזמנה" button (the WhatsApp
+// contact CTA — see ProductPage.jsx's book()), so admin can follow up and
+// check whether a deal closed. Deliberately NOT the same table as `Booking`
+// above: `Booking` is older, unrelated, currently-dormant infrastructure for
+// a full renter/lister request-response workflow (status, 24h SLA) — not a
+// payment schema (checked: no payment/stripe/checkout code or mentions
+// anywhere in this repo's history) — and this feature explicitly has no
+// status/workflow beyond "exists, can be deleted." Keeping them separate
+// avoids overloading Booking's semantics with this simpler logging use case.
+//
+// `renterId` is a genuine relation — this button already requires the
+// renter to be logged in, so there's always a real User row. `dressId` /
+// `dressTitle` / `ownerPhone` are a denormalized snapshot instead of
+// relations, because dresses (and their owners' listing-contact info)
+// currently live only in the frontend's localStorage mock, not in this
+// database — see the note on Dress's lack of a `phone` field. There is no
+// real Dress row for a foreign key to point at.
+model BookingInquiry {
+  id          String @id @default(uuid())
+
+  renterId    String
+  renter      User   @relation("bookingInquiries", fields: [renterId], references: [id])
+  renterPhone String // snapshot at click-time, independent of later profile edits
+
+  dressId     String // the mock system's dress id — app already routes to dress detail by this id
+  dressTitle  String
+  ownerPhone  String
+
+  selectedStartDate DateTime
+  selectedEndDate   DateTime
+
+  createdAt   DateTime @default(now())
+
+  @@index([renterId])
+  @@index([dressId])
+  @@index([createdAt])
 }
 
 model Favorite {

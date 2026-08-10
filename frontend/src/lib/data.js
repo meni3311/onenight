@@ -3,12 +3,11 @@
    ============================================================ */
 
 export const REGIONS = ["צפון","חיפה והכרמל","מרכז","גוש דן","ירושלים","דרום","שומרון ויהודה"];
-export const SIZES = ["XS","S","M","L","XL","XXL","34","36","38","40","42","44","46","48","50","52"];
-export const LENGTHS = ["קצר","בינוני","ארוך"];
+export const SIZES = ["XS","S","M","L","XL","XXL","34","36","38","40","42","44","46","48","50","52","אחר"];
 export const CONDITIONS = ["חדשה","כמו חדשה","טובה מאוד","טובה","סבירה"];
-/* New structured filter categories (task: dress length + sleeve length).
-   Deliberately separate from the pre-existing `LENGTHS`/`length` field above
-   — that one stays untouched (out of scope), these back the two new filters. */
+/* Structured filter categories: dress length + sleeve length. The old
+   free-form `LENGTHS`/`length` field that used to duplicate `DRESS_LENGTHS`
+   has been removed — this is now the single source of truth. */
 export const DRESS_LENGTHS = ["קצר","אמצע","ארוך"];
 export const SLEEVE_LENGTHS = ["קצר","אמצע","ארוך"];
 export const ADMIN_PASSWORD = "onenight2026"; // demo only — replace with real auth
@@ -40,14 +39,14 @@ const seedImgs = [
 function img(i){ return seedImgs[i % seedImgs.length]; }
 
 export const SEED = [
-  {title:"שמלת ערב אדומה זוהרת", desc:"שמלה אדומה ארוכה עם שובל עדין, מושלמת לאירוע מרשים. נלבשה פעם אחת בלבד.", color:"אדום", colorHex:"#B23A48", condition:"כמו חדשה", length:"ארוך", dressLength:"ארוך", sleeveLength:"קצר", price:280, region:"גוש דן", size:"M", source:"תפירה אישית", store:"", phone:"0521111111", email:"a@x.com"},
-  {title:"שמלת מקסי שמפניה", desc:"גוון שמפניה רך עם תחרה צרפתית, מחמיא לכל גוף.", color:"שמפניה", colorHex:"#D9C2A0", condition:"חדשה", length:"ארוך", dressLength:"ארוך", sleeveLength:"אמצע", price:340, region:"מרכז", size:"S", source:"שם חנות", store:"Boutique Lior", phone:"0522222222", email:"b@x.com"},
-  {title:"שמלת קוקטייל שחורה", desc:"קלאסיקה שחורה באורך ברך, אלגנטית ונצחית.", color:"שחור", colorHex:"#2A2A2A", condition:"טובה מאוד", length:"בינוני", dressLength:"אמצע", sleeveLength:"קצר", price:190, region:"ירושלים", size:"L", source:"תפירה אישית", store:"", phone:"0523333333", email:"c@x.com"},
-  {title:"שמלת נסיכה תכלת", desc:"גוון תכלת חולמני עם חצאית נפוחה, לאירוע יוצא דופן.", color:"תכלת", colorHex:"#A9C5D6", condition:"כמו חדשה", length:"ארוך", dressLength:"ארוך", sleeveLength:"ארוך", price:310, region:"חיפה והכרמל", size:"M", source:"שם חנות", store:"Dvash", phone:"0524444444", email:"d@x.com"},
-  {title:"שמלת זמש ירוק בקבוק", desc:"ירוק עמוק עם גזרה מחטבת, תחושת קטיפה.", color:"ירוק", colorHex:"#3E5A48", condition:"טובה מאוד", length:"ארוך", dressLength:"ארוך", sleeveLength:"ארוך", price:260, region:"צפון", size:"M", source:"תפירה אישית", store:"", phone:"0525555555", email:"e@x.com"},
-  {title:"שמלת מיני נצנצים", desc:"שמלת מיני מנצנצת לערב בלתי נשכח, נוחה לריקודים.", color:"כסף", colorHex:"#C8C8CC", condition:"חדשה", length:"קצר", dressLength:"קצר", sleeveLength:"קצר", price:170, region:"גוש דן", size:"XS", source:"שם חנות", store:"Glam", phone:"0526666666", email:"f@x.com"},
-  {title:"שמלת ערב סגול עמוק", desc:"גוון סגול מלכותי, מחשוף עדין וגב חשוף.", color:"סגול", colorHex:"#5E4B79", condition:"טובה", length:"ארוך", dressLength:"ארוך", sleeveLength:"אמצע", price:220, region:"דרום", size:"L", source:"תפירה אישית", store:"", phone:"0527777777", email:"g@x.com"},
-  {title:"שמלת סאטן ורד אבק", desc:"סאטן בגוון ורוד אבקתי, נופל בצורה מושלמת.", color:"ורוד", colorHex:"#C4A0A0", condition:"כמו חדשה", length:"בינוני", dressLength:"אמצע", sleeveLength:"קצר", price:240, region:"מרכז", size:"S", source:"שם חנות", store:"Rosa", phone:"0528888888", email:"h@x.com"},
+  {title:"שמלת ערב אדומה זוהרת", desc:"שמלה אדומה ארוכה עם שובל עדין, מושלמת לאירוע מרשים. נלבשה פעם אחת בלבד.", color:"אדום", colorHex:"#B23A48", condition:"כמו חדשה", dressLength:"ארוך", sleeveLength:"קצר", price:280, region:"גוש דן", city:"תל אביב", size:"M", source:"תפירה אישית", store:"", phone:"0521111111", email:"a@x.com"},
+  {title:"שמלת מקסי שמפניה", desc:"גוון שמפניה רך עם תחרה צרפתית, מחמיא לכל גוף.", color:"שמפניה", colorHex:"#D9C2A0", condition:"חדשה", dressLength:"ארוך", sleeveLength:"אמצע", price:340, region:"מרכז", city:"פתח תקווה", size:"S", source:"שם חנות", store:"Boutique Lior", phone:"0522222222", email:"b@x.com"},
+  {title:"שמלת קוקטייל שחורה", desc:"קלאסיקה שחורה באורך ברך, אלגנטית ונצחית.", color:"שחור", colorHex:"#2A2A2A", condition:"טובה מאוד", dressLength:"אמצע", sleeveLength:"קצר", price:190, region:"ירושלים", city:"ירושלים", size:"L", source:"תפירה אישית", store:"", phone:"0523333333", email:"c@x.com"},
+  {title:"שמלת נסיכה תכלת", desc:"גוון תכלת חולמני עם חצאית נפוחה, לאירוע יוצא דופן.", color:"תכלת", colorHex:"#A9C5D6", condition:"כמו חדשה", dressLength:"ארוך", sleeveLength:"ארוך", price:310, region:"חיפה והכרמל", city:"חיפה", size:"M", source:"שם חנות", store:"Dvash", phone:"0524444444", email:"d@x.com"},
+  {title:"שמלת זמש ירוק בקבוק", desc:"ירוק עמוק עם גזרה מחטבת, תחושת קטיפה.", color:"ירוק", colorHex:"#3E5A48", condition:"טובה מאוד", dressLength:"ארוך", sleeveLength:"ארוך", price:260, region:"צפון", city:"כרמיאל", size:"M", source:"תפירה אישית", store:"", phone:"0525555555", email:"e@x.com"},
+  {title:"שמלת מיני נצנצים", desc:"שמלת מיני מנצנצת לערב בלתי נשכח, נוחה לריקודים.", color:"כסף", colorHex:"#C8C8CC", condition:"חדשה", dressLength:"קצר", sleeveLength:"קצר", price:170, region:"גוש דן", city:"רמת גן", size:"XS", source:"שם חנות", store:"Glam", phone:"0526666666", email:"f@x.com"},
+  {title:"שמלת ערב סגול עמוק", desc:"גוון סגול מלכותי, מחשוף עדין וגב חשוף.", color:"סגול", colorHex:"#5E4B79", condition:"טובה", dressLength:"ארוך", sleeveLength:"אמצע", price:220, region:"דרום", city:"באר שבע", size:"L", source:"תפירה אישית", store:"", phone:"0527777777", email:"g@x.com"},
+  {title:"שמלת סאטן ורד אבק", desc:"סאטן בגוון ורוד אבקתי, נופל בצורה מושלמת.", color:"ורוד", colorHex:"#C4A0A0", condition:"כמו חדשה", dressLength:"אמצע", sleeveLength:"קצר", price:240, region:"מרכז", city:"ראשון לציון", size:"S", source:"שם חנות", store:"Rosa", phone:"0528888888", email:"h@x.com"},
 ].map((d,i)=>({
   id:"seed-"+i,
   status:"approved",
