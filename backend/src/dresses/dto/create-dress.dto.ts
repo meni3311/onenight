@@ -2,32 +2,40 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
   IsArray,
-  IsEnum,
+  IsEmail,
+  IsIn,
   IsNumber,
   IsOptional,
   IsPositive,
   IsString,
-  IsUUID,
+  IsUrl,
+  MaxLength,
 } from 'class-validator';
-import {
-  DressCondition,
-  DressLength,
-  DressSource,
-  SleeveLength,
-} from '@prisma/client';
 
 /**
- * Body for POST /dresses (publish a new listing).
+ * Allowed values for the four free-text option columns. These mirror
+ * frontend/src/lib/data.js exactly — that file is the source of truth for what
+ * the form offers, and these columns have no DB-level constraint (they stopped
+ * being enums when the dress flow moved off the localStorage mock), so this
+ * DTO is the only thing keeping junk out. Update both together.
+ */
+export const CONDITIONS = ['חדשה', 'כמו חדשה', 'טובה מאוד', 'טובה', 'סבירה'];
+export const SOURCES = ['תפירה אישית', 'שם חנות'];
+export const LENGTHS = ['קצר', 'אמצע', 'ארוך'];
+
+/**
+ * Body for POST /dresses. Field names match the publish form one-for-one so
+ * the frontend can post its form state as-is.
  *
- * Scoped to the Dress model's own scalar fields plus its size/image
- * relations — auth (deriving `ownerId` from the logged-in session) and the
- * listing-approval flow are separate, pre-existing concerns and untouched
- * here, so `ownerId` is accepted as a plain field for now.
+ * `ownerId` is deliberately absent: it's resolved server-side from `email`
+ * (see DressesService.createDress) so a client can't claim someone else's
+ * listing by guessing a uuid. `status` is not accepted either — new listings
+ * always start "pending" and only the admin endpoint moves them.
  */
 export class CreateDressDto {
-  @ApiProperty() @IsString() name!: string;
+  @ApiProperty() @IsString() @MaxLength(200) title!: string;
 
-  @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(4000) desc?: string;
 
   @ApiProperty() @IsNumber() @IsPositive() price!: number;
 
@@ -35,38 +43,40 @@ export class CreateDressDto {
 
   @ApiPropertyOptional() @IsOptional() @IsString() color?: string;
 
+  @ApiPropertyOptional() @IsOptional() @IsString() colorHex?: string;
+
   @ApiPropertyOptional() @IsOptional() @IsString() designer?: string;
 
-  @ApiProperty({ enum: DressSource }) @IsEnum(DressSource) source!: DressSource;
+  @ApiProperty({ enum: SOURCES }) @IsIn(SOURCES) source!: string;
 
-  @ApiProperty({ enum: DressCondition })
-  @IsEnum(DressCondition)
-  condition!: DressCondition;
+  @ApiPropertyOptional() @IsOptional() @IsString() store?: string;
 
-  /** Dress length — short / medium / long. Required (see task brief §4–6). */
-  @ApiProperty({ enum: DressLength })
-  @IsEnum(DressLength)
-  dressLength!: DressLength;
+  @ApiProperty({ enum: CONDITIONS }) @IsIn(CONDITIONS) condition!: string;
 
-  /** Sleeve length — short / medium / long. Required (see task brief §4–6). */
-  @ApiProperty({ enum: SleeveLength })
-  @IsEnum(SleeveLength)
-  sleeveLength!: SleeveLength;
+  @ApiProperty({ enum: LENGTHS }) @IsIn(LENGTHS) dressLength!: string;
+
+  @ApiProperty({ enum: LENGTHS }) @IsIn(LENGTHS) sleeveLength!: string;
 
   @ApiPropertyOptional() @IsOptional() @IsString() city?: string;
 
-  @ApiProperty() @IsUUID() ownerId!: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() region?: string;
 
-  @ApiPropertyOptional({ type: [String], description: 'Size labels, e.g. ["S","M"]' })
+  @ApiPropertyOptional() @IsOptional() @IsString() size?: string;
+
+  @ApiPropertyOptional() @IsOptional() @IsString() phone?: string;
+
+  /** Resolves the owner. Must match a registered user's email. */
+  @ApiProperty() @IsEmail() email!: string;
+
+  /**
+   * Public Supabase Storage URLs produced by POST /dresses/images. `IsUrl`
+   * rejects the base64 data: URLs the old mock used to store, which is the
+   * point — image bytes must never come through this endpoint again.
+   */
+  @ApiPropertyOptional({ type: [String], description: 'Public image URLs, in display order' })
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
-  sizes?: string[];
-
-  @ApiPropertyOptional({ type: [String], description: 'Image URLs, in display order' })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
+  @IsUrl({ require_tld: false }, { each: true })
   @ArrayMaxSize(3)
   images?: string[];
 }

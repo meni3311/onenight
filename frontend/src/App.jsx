@@ -4,6 +4,7 @@
    ============================================================ */
 import { useState, useEffect, useMemo } from "react";
 import { api } from "./lib/api.js";
+import { purgeLegacyDressStorage } from "./lib/data.js";
 import { useLocalStorage } from "./hooks/useLocalStorage.js";
 import { useToast } from "./hooks/useToast.js";
 import { EMPTY_FILTERS } from "./components/filters/filterConstants.js";
@@ -114,12 +115,31 @@ export default function App() {
     }
   };
 
-  useEffect(() => { reloadDresses(); }, []);
+  /* Clear the pre-Postgres mock listings out of this browser before the
+     first load. Runs ahead of reloadDresses so a stale cache can never be
+     mistaken for API data during that first render. */
+  useEffect(() => {
+    purgeLegacyDressStorage();
+    reloadDresses();
+  }, []);
   useEffect(() => {
     const h = () => { const hr = routeFromHash(); if (HASH_ROUTES.has(hr)) setRoute(hr); };
     window.addEventListener("hashchange", h);
     return () => window.removeEventListener("hashchange", h);
   }, []);
+
+  /* Hide the viewport scrollbar on the homepage only (see the
+     .hide-viewport-scrollbar rules in styles.css). The class goes on
+     <html> rather than a wrapper div because the homepage has no scroll
+     container of its own — the document scrolls, so the scrollbar belongs
+     to the viewport. Other routes share that same scrollbar and keep it,
+     hence the toggle. Cleanup on unmount so the class can't outlive the
+     app during hot reloads. */
+  useEffect(() => {
+    const el = document.documentElement;
+    el.classList.toggle("hide-viewport-scrollbar", route === "home");
+    return () => el.classList.remove("hide-viewport-scrollbar");
+  }, [route]);
 
   const dressById = (id) => dresses.find((d) => d.id === id);
   const toggleFav = (id) =>

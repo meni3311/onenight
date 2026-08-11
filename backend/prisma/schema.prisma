@@ -12,31 +12,10 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-enum DressCondition {
-  NEW
-  LIKE_NEW
-  VERY_GOOD
-  GOOD
-  FAIR
-}
-
-enum DressSource {
-  PERSONAL_TAILOR
-  BOUTIQUE
-  STORE
-}
-
-enum DressLength {
-  SHORT
-  MEDIUM
-  LONG
-}
-
-enum SleeveLength {
-  SHORT
-  MEDIUM
-  LONG
-}
+// NOTE: the DressCondition / DressSource / DressLength / SleeveLength enums
+// that used to live here were dropped when the dress flow moved off the
+// localStorage mock — those four columns are now plain text holding the
+// Hebrew labels the UI already uses. See the comment above `model Dress`.
 
 // Mirrors the (now-retired) TypeORM `users` entity field-for-field, so the
 // SQLite → Postgres move is a pure persistence swap with no behaviour change.
@@ -70,28 +49,57 @@ model User {
   bookingInquiries BookingInquiry[] @relation("bookingInquiries")
 }
 
+// The publish/edit/browse UI is the only consumer of this model, so the
+// columns mirror that form's fields one-for-one (see PublishPage.jsx).
+//
+// `condition` / `source` / `dressLength` / `sleeveLength` are plain text
+// holding the Hebrew option labels ("כמו חדשה", "תפירה אישית", "ארוך", …)
+// rather than the enums they used to be. That's a deliberate call made when
+// migrating the dress flow off the localStorage mock: the mock stored the
+// Hebrew labels, and every filter/compare in App.jsx matches on them
+// directly, so keeping enums would have meant a translation layer on every
+// read and write. Trade-off: no DB-level constraint on these four columns —
+// the allowed values live in frontend/src/lib/data.js (CONDITIONS,
+// DRESS_LENGTHS, SLEEVE_LENGTHS) and are enforced by the DTO validators in
+// dto/create-dress.dto.ts. Keep those two lists in sync.
 model Dress {
   id          String         @id @default(uuid())
-  name        String
-  description String?
+  // Renamed from `name`/`description` to match the form field names.
+  title       String
+  desc        String?
   price       Float
   fabric      String?
   color       String?
+  // Hex swatch used by the card/placeholder rendering.
+  colorHex    String?
   designer    String?
-  source      DressSource
-  condition   DressCondition
-  // `dressLength`/`sleeveLength` are the structured length filter fields
-  // (short/medium/long each). The old free-form `length` column that used to
-  // duplicate `dressLength` has been removed — `dressLength` is now the
-  // single source of truth for a dress's length.
-  dressLength  DressLength
-  sleeveLength SleeveLength
+  source      String
+  // Free-text shop name; only meaningful when `source` is "שם חנות".
+  store       String?
+  condition   String
+  dressLength  String
+  sleeveLength String
   // Free-text city, distinct from `User.city`. Nullable/optional so existing
   // listings created before this field don't break.
   city         String?
+  // Delivery/pickup region, chosen from data.js REGIONS. Distinct from
+  // `city`: region is the coarse filter facet, city is free text.
+  region       String?
+  // Contact details captured on the listing itself. `email` also drives the
+  // "my listings" filter in AccountPage, and is what resolves `ownerId`
+  // server-side at create time.
+  phone        String?
+  email        String?
+  // The single size this listing is offered in. The `sizes` relation below
+  // predates the publish form and stays for the (dormant) multi-size
+  // booking flow; the form writes this scalar.
+  size         String?
   ownerId      String
   owner        User                @relation(fields: [ownerId], references: [id])
   status       String              @default("pending") // pending | approved | rejected
+  // Admin's note when status is "rejected", surfaced to the owner in their
+  // listings view. Empty/null for pending and approved listings.
+  rejectReason String?
   sizes        DressSize[]
   images       DressImage[]
   bookings     Booking[]

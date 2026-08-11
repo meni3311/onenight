@@ -8,6 +8,7 @@ import { DressesModule } from './dresses/dresses.module';
 import { UsersModule } from './users/users.module';
 import { AuthOtpModule } from './auth-otp/auth-otp.module';
 import { BookingInquiriesModule } from './booking-inquiries/booking-inquiries.module';
+import { AdminController } from './common/admin.controller';
 
 @Module({
   imports: [
@@ -30,5 +31,7 @@ import { BookingInquiriesModule } from './booking-inquiries/booking-inquiries.mo
     AuthOtpModule,
     BookingInquiriesModule,
   ],
+  // Standalone: just the admin password check, no service of its own.
+  controllers: [AdminController],
 })
 export class AppModule {}

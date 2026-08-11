@@ -18,10 +18,10 @@ function sendEmail(type, d) {
   }
 }
 
-/* Booking-inquiry helpers — these hit the real NestJS/Prisma backend
-   directly (via fetch, same pattern as AuthContext/ProductPage's
-   logBookingInquiry), not the localStorage-backed `api()` mock the rest of
-   this page uses for dresses. */
+/* Booking-inquiry helpers — raw fetch rather than the shared `api()` helper,
+   same pattern as AuthContext/ProductPage's logBookingInquiry. Both reach the
+   same NestJS/Prisma backend now that the dress calls on this page are no
+   longer served by a localStorage mock. */
 const waLink = (phone) => `https://wa.me/972${(phone || "").replace(/^0/, "")}`;
 const fmtDateTime = (iso) => new Date(iso).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" });
 const fmtDate = (iso) => new Date(iso).toLocaleDateString("he-IL");

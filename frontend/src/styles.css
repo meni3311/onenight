@@ -1217,7 +1217,27 @@ input[type=range] { accent-color: var(--rose); }
    scope here). Source order lets these win over the .admin-row rules
    above at equal specificity. */
 .owner-row { flex-direction: column; align-items: stretch; }
-.owner-row img { width: 100%; height: 180px; }
+.owner-row img { width: 100%; height: 180px; object-fit: cover; }
+
+/* Wide desktop: a full-width row with a fixed 180px-tall image makes for a
+   very short/wide crop box (row can be ~1200px wide inside the 1280px
+   .container), so `cover` was cutting off most of the photo's left/right
+   sides. Cap the image to a sane portrait width with a 3/4 aspect ratio
+   (matches typical dress-photo proportions) and switch to `contain` so the
+   whole photo stays visible instead of being cropped to fill the box.
+   Mobile/tablet keep the original 180px strip untouched. */
+@media (min-width: 1025px) {
+  .owner-row img {
+    width: 100%;
+    max-width: 320px;
+    height: auto;
+    aspect-ratio: 3 / 4;
+    object-fit: contain;
+    background: var(--surface-2);
+    margin: 0 auto;
+    display: block;
+  }
+}
 
 .status-pill { font-size: 9px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 3px 10px; border-radius: var(--r-xs); }
 .status-pending  { background: #F5ECDD; color: var(--gold); }
@@ -1306,6 +1326,42 @@ input[type=range] { accent-color: var(--rose); }
   box-shadow: 0 2px 8px rgba(40,18,16,0.45); cursor: pointer;
 }
 .price-slider::-moz-range-track { background: transparent; height: 6px; }
+
+/* ---------- Homepage: hide the viewport scrollbar ----------
+   The homepage has no scroll container of its own — App.jsx's wrapper is
+   `min-h-screen` with no overflow, so the *document* scrolls and the
+   scrollbar belongs to the viewport. That's why the existing .op-scroll /
+   .glass-scroll rules don't help here: those target inner divs that own
+   their own scroll.
+
+   Targeting `html` specifically, not `body` and not `*`:
+     - When html's overflow is `visible` (it is), the used overflow
+       propagates to the viewport, and Chrome renders that scrollbar as the
+       html element's. `body::-webkit-scrollbar` would silently miss it —
+       the likely reason an earlier attempt elsewhere "didn't fully work".
+     - A blanket `*::-webkit-scrollbar` would also wipe out .lux-scroll's
+       deliberate custom scrollbar and .glass-scroll's, so it's avoided.
+
+   Scoped to a class rather than applied to html outright because the same
+   viewport scrollbar serves every document-scrolled route (account, admin,
+   terms), and only the homepage was reported. App.jsx toggles the class on
+   documentElement as the route changes.
+
+   Scrolling itself is untouched: no overflow is set here. `scrollbar-width:
+   none` and a hidden ::-webkit-scrollbar suppress the *indicator* only —
+   wheel, trackpad, touch, keyboard and programmatic scrolling all still
+   work. */
+html.hide-viewport-scrollbar {
+  scrollbar-width: none;      /* Firefox */
+  -ms-overflow-style: none;   /* legacy Edge/IE */
+}
+html.hide-viewport-scrollbar::-webkit-scrollbar {
+  /* Chrome/Edge/Safari. width/height zeroed alongside display:none —
+     display alone is ignored by some WebKit versions. */
+  display: none;
+  width: 0;
+  height: 0;
+}
 
 /* fully hide the native scrollbar on the frosted-glass filter panel */
 .glass-scroll { scrollbar-width: none; -ms-overflow-style: none; }

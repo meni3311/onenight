@@ -570,11 +570,57 @@ const CSS = `
   border:1px solid rgba(255,255,255,0.2);box-shadow:0 4px 16px rgba(0,0,0,0.08);
   transition:transform .2s ease;}
 .op-glass:hover{transform:scale(1.06);}
-.op-glass-back{left:16px;}
-.op-glass-fav{right:16px;}
+/* Swapped: back sits top-right, favourite top-left. These are physical
+   left/right (not inset-inline) so they don't flip with the page's RTL
+   direction — changing the values here is the whole swap, and both buttons
+   keep their own styling and behaviour. */
+.op-glass-back{right:16px;}
+.op-glass-fav{left:16px;}
 .op-dots{position:absolute;bottom:16px;left:0;right:0;display:flex;justify-content:center;gap:7px;}
 .op-dot{width:7px;height:7px;border-radius:50%;border:none;padding:0;cursor:pointer;transition:transform .2s;}
 .op-dot:hover{transform:scale(1.2);}
+
+/* Wide desktop: this page is mobile-first (full-bleed 100vw x 75vh gallery),
+   so on a wide screen the gallery box becomes an ultra-wide letterbox
+   (e.g. ~1920x810) that bears no resemblance to a portrait dress photo's
+   proportions — 'cover' was cropping most of the photo away. Cap the
+   gallery to a portrait-ish column with a 3/4 aspect ratio and switch to
+   'contain' so the full photo is always visible, instead of stretching the
+   crop across the whole viewport width. Mobile/tablet keep the original
+   full-bleed 75vh treatment untouched. */
+@media (min-width:1025px){
+  /* The frame shrink-wraps the photo instead of imposing a fixed 3/4 box.
+     Fixing the height and letting width follow the image's natural aspect
+     means the element's box IS the photo — no letterboxing, whatever the
+     photo's proportions.
+
+     This replaces an earlier attempt that used a fixed 'aspect-ratio:3/4'
+     with 'object-fit:contain'. That showed the whole photo (the point), but
+     any dress narrower than 3/4 left empty bands at the sides, and the
+     absolutely-positioned icons below sat on those bands rather than on the
+     image. Nudging their inset inward was treating the symptom: no fixed
+     value works, because the band width depends on each photo's aspect.
+     With the box hugging the image, a small inset is inside the frame by
+     construction.
+
+     max-width:100% is a guard for an unusually wide (landscape) photo,
+     which would otherwise overflow; object-fit:contain keeps it undistorted
+     if that clamp ever engages. */
+  .op-gallery{width:fit-content;max-width:100%;height:auto;margin:0 auto;}
+  .op-gallery-img{
+    width:auto;
+    height:min(78vh, 760px);
+    max-width:100%;
+    object-fit:contain;
+  }
+
+  /* A modest inset from the photo's own edges. Mobile keeps its 16px and is
+     untouched — there the image uses 'cover' and fills the box edge to
+     edge, so the icons already sit on the photo. */
+  .op-glass{top:20px;}
+  .op-glass-back{right:20px;}
+  .op-glass-fav{left:20px;}
+}
 
 /* shared section shell */
 .op-sec{background:${C.white};padding:24px;border-bottom:1px solid ${C.divider};}

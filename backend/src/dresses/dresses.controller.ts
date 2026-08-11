@@ -5,74 +5,105 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { DressesService } from './dresses.service';
-import { CheckAvailabilityDto } from './dto/check-availability.dto';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { AdminGuard } from '../common/admin.guard';
+import { DressesService, ClientDress } from './dresses.service';
+import { StorageService, UploadedImage } from './storage.service';
 import { CreateDressDto } from './dto/create-dress.dto';
-import { ListDressesQueryDto } from './dto/list-dresses-query.dto';
-import {
-  AvailabilityResultDto,
-  DressDetailDto,
-  DressListItemDto,
-  DressSummaryDto,
-  UnavailableDateRangeDto,
-} from './dto/dress-detail.dto';
+import { UpdateDressDto } from './dto/update-dress.dto';
+import { ToggleBookedDateDto, UpdateDressStatusDto } from './dto/dress-admin.dto';
 
 @ApiTags('dresses')
-@Controller('dresses')
+// Prefix matches the other controllers (`api/auth`, `api/booking-inquiries`)
+// — there's no global prefix set in main.ts, so each controller carries it.
+// This used to be just 'dresses', which no client ever called; the frontend
+// has always used /api/... and went to the localStorage mock instead.
+@Controller('api/dresses')
 export class DressesController {
-  constructor(private readonly service: DressesService) {}
+  constructor(
+    private readonly service: DressesService,
+    private readonly storage: StorageService,
+  ) {}
 
   @Get()
-  @ApiOperation({ summary: 'Browse/filter dresses (price range, colors, dress/sleeve length — AND across categories, OR within one)' })
-  @ApiResponse({ status: 200, type: [DressListItemDto] })
-  listDresses(@Query() query: ListDressesQueryDto): Promise<DressListItemDto[]> {
-    return this.service.listDresses(query);
+  @ApiOperation({ summary: 'List dresses — ?status=approved (default) | pending | rejected | all' })
+  listDresses(
+    @Query('status', new DefaultValuePipe('approved')) status: string,
+  ): Promise<ClientDress[]> {
+    return this.service.listDresses(status);
+  }
+
+  /**
+   * Upload one listing photo and get back its public URL. Declared before
+   * `:id` routes — Nest matches in declaration order, so without this
+   * "images" would be captured as a dress id.
+   */
+  @Post('images')
+  @ApiOperation({ summary: 'Upload a listing photo to Supabase Storage' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadImage(
+    @UploadedFile() file: UploadedImage,
+    @Query('dressId') dressId?: string,
+  ): Promise<{ url: string }> {
+    const url = await this.storage.uploadDressImage(file, dressId || 'pending');
+    return { url };
   }
 
   @Post()
-  @ApiOperation({ summary: 'Publish a new dress listing' })
-  @ApiResponse({ status: 201, type: DressDetailDto })
-  createDress(@Body() dto: CreateDressDto): Promise<DressDetailDto> {
+  @ApiOperation({ summary: 'Publish a new dress listing (starts as pending)' })
+  createDress(@Body() dto: CreateDressDto): Promise<ClientDress> {
     return this.service.createDress(dto);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get full dress detail with sizes, images, reviews' })
-  @ApiResponse({ status: 200, type: DressDetailDto })
-  getDressById(@Param('id') id: string): Promise<DressDetailDto> {
+  @ApiOperation({ summary: 'Get one dress' })
+  getDressById(@Param('id') id: string): Promise<ClientDress> {
     return this.service.getDressById(id);
   }
 
-  @Get(':id/unavailable-dates')
-  @ApiOperation({ summary: 'List booked (unavailable) date ranges for a dress' })
-  @ApiResponse({ status: 200, type: [UnavailableDateRangeDto] })
-  getUnavailableDates(
+  @Patch(':id')
+  @ApiOperation({ summary: "Edit a listing's fields and/or replace its images" })
+  updateDress(
     @Param('id') id: string,
-  ): Promise<UnavailableDateRangeDto[]> {
-    return this.service.getUnavailableDates(id);
+    @Body() dto: UpdateDressDto,
+  ): Promise<ClientDress> {
+    return this.service.updateDress(id, dto);
   }
 
-  @Post(':id/check-availability')
-  @ApiOperation({ summary: 'Check whether a dress+size is free for a date range' })
-  @ApiResponse({ status: 200, type: AvailabilityResultDto })
-  checkAvailability(
+  @Patch(':id/booked')
+  @ApiOperation({ summary: 'Toggle one day on the availability calendar' })
+  toggleBooked(
     @Param('id') id: string,
-    @Body() dto: CheckAvailabilityDto,
-  ): Promise<AvailabilityResultDto> {
-    return this.service.checkAvailability(id, dto);
+    @Body() dto: ToggleBookedDateDto,
+  ): Promise<ClientDress> {
+    return this.service.toggleBookedDate(id, dto.key);
+  }
+
+  @Patch(':id/status')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Admin: approve or reject a listing' })
+  updateStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateDressStatusDto,
+  ): Promise<ClientDress> {
+    return this.service.updateStatus(id, dto);
   }
 
   @Get(':id/similar')
-  @ApiOperation({ summary: 'Get similar dresses (same colour or source)' })
-  @ApiResponse({ status: 200, type: [DressSummaryDto] })
+  @ApiOperation({ summary: 'Similar approved dresses (same colour or source)' })
   getSimilarDresses(
     @Param('id') id: string,
     @Query('limit', new DefaultValuePipe(4), ParseIntPipe) limit: number,
-  ): Promise<DressSummaryDto[]> {
+  ): Promise<ClientDress[]> {
     return this.service.getSimilarDresses(id, limit);
   }
 }

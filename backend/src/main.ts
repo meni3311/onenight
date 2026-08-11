@@ -19,11 +19,13 @@ async function bootstrap(): Promise<void> {
     }),
   );
 
-  // Larger limit so base64 image uploads from the publish form fit.
+  // Listing photos are uploaded as multipart to POST /dresses/images (handled
+  // by multer) and stored in Supabase Storage, so JSON bodies now only ever
+  // carry the resulting URLs — no need for the old 12mb base64 allowance.
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const express = require('express');
-  app.use(express.json({ limit: '12mb' }));
-  app.use(express.urlencoded({ limit: '12mb', extended: true }));
+  app.use(express.json({ limit: '1mb' }));
+  app.use(express.urlencoded({ limit: '1mb', extended: true }));
 
   // Swagger / OpenAPI docs at /docs
   const config = new DocumentBuilder()
