@@ -30,7 +30,7 @@ npm run preview    # preview the production build
 ## Demo logins
 
 - **Register**: any details; SMS verification code is `1234`.
-- **Admin panel**: open `/#admin`, password `onenight2026` (approve/reject listings).
+- **Admin panel**: open `/#admin` (approve/reject listings).
 
 ## Structure
 

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { placeholder } from "../lib/data.js";
 import { api } from "../lib/api.js";
 import { ImageUploader } from "../components/ui/ImageUploader.jsx";
+import { AiImaginePanel } from "../components/admin/AiImaginePanel.jsx";
 
 const STATUS_LABELS = { approved: "מאושרת", pending: "ממתינה", rejected: "נדחתה" };
 const TABS = [["pending", "ממתינות"], ["approved", "מאושרות"], ["rejected", "נדחו"]];
@@ -35,6 +36,11 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
   const [reason, setReason] = useState("");
   const [editingImages, setEditingImages] = useState(null); // dress id currently being edited
   const [draftImages, setDraftImages] = useState([]);
+  // Dress id whose AI photo panel is open. Separate from `editingImages` and
+  // mutually exclusive with it — the two panels edit the same photo set from
+  // opposite ends (a draft array saved on demand vs. immediate writes), so
+  // having both open invites saving a stale draft over a fresh generation.
+  const [aiImagining, setAiImagining] = useState(null);
 
   // Booking inquiries ("להזמנה" click log) — lazily loaded from the real
   // backend the first (and every subsequent) time this tab is opened, so
@@ -80,7 +86,7 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
         <h2>כניסת מנהלת</h2>
         <p className="form-sub">אזור מוגן — בעלות האתר בלבד</p>
         <div className="field mb-4"><label>סיסמה</label>
-          <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="הסיסמה: onenight2026" /></div>
+          <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="הסיסמה:" /></div>
         <button className="btn btn-rose btn-block" onClick={async () => {
           try {
             const r = await api("/api/admin/login", { method: "POST", body: { password: pw } });
@@ -112,8 +118,12 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
 
   /* Edit the images on a listing request — same `images` field the listing
      itself renders from, so once approved the edited set is what's live. */
-  const startEditingImages = (d) => { setEditingImages(d.id); setDraftImages(d.images); };
+  const startEditingImages = (d) => { setAiImagining(null); setEditingImages(d.id); setDraftImages(d.images); };
   const cancelEditingImages = () => { setEditingImages(null); setDraftImages([]); };
+  const toggleAiImagining = (d) => {
+    setEditingImages(null); setDraftImages([]);
+    setAiImagining((p) => (p === d.id ? null : d.id));
+  };
   const saveImages = async () => {
     try {
       const up = await api("/api/dresses/" + editingImages, { method: "PATCH", body: { images: draftImages } });
@@ -196,13 +206,27 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
                 {editingImages === d.id
                   ? <button className="btn btn-ghost" onClick={cancelEditingImages}>ביטול עריכת תמונות</button>
                   : <button className="btn btn-ghost" onClick={() => startEditingImages(d)}>🖼️ עריכת תמונות</button>}
+                <button className="btn btn-ghost" onClick={() => toggleAiImagining(d)}>
+                  {aiImagining === d.id ? "סגירת AI Imagine" : "✨ AI Imagine"}
+                </button>
               </div>
+              {/* max is 8 here, not the publish form's 3: AI generations are
+                  appended to this same gallery, so a 3-photo ceiling would
+                  reject the results of a multi-select. */}
               {editingImages === d.id && <div className="mt-2.5">
-                <ImageUploader images={draftImages} setImages={setDraftImages} max={3} />
+                <ImageUploader images={draftImages} setImages={setDraftImages} max={8} />
                 <div className="mt-2 flex gap-2">
                   <button className="btn btn-sage" onClick={saveImages} disabled={draftImages.length === 0}>שמירת תמונות</button>
                   <button className="btn btn-ghost" onClick={cancelEditingImages}>ביטול</button>
                 </div>
+              </div>}
+              {aiImagining === d.id && <div className="mt-2.5">
+                <AiImaginePanel
+                  dress={d}
+                  adminPw={pw}
+                  toast={toast}
+                  onUpdated={(fresh) => setDresses((p) => p.map((x) => (x.id === fresh.id ? fresh : x)))}
+                />
               </div>}
               {rejecting && rejecting.id === d.id && <div className="mt-2.5">
                 <input type="text" placeholder="סיבת הדחייה (תופיע במייל למפרסמת)" value={reason} onChange={(e) => setReason(e.target.value)} className="mb-2 w-full rounded-lg border border-[var(--border)] p-2.5" />

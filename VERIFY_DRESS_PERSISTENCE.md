@@ -114,7 +114,7 @@ Now verify it went to the real backend, not the browser:
   base64 blob and it must never reach the database.
 - Paste one of those URLs into a fresh tab: the photo loads without auth.
 
-4. Approve the listing (`/#admin`, password `onenight2026`) so it's publicly
+4. Approve the listing (`/#admin`) so it's publicly
    visible — new listings start `pending` by design.
 
 ### Browser B — read back

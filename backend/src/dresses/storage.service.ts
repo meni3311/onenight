@@ -80,6 +80,60 @@ export class StorageService {
       throw new BadRequestException('סוג קובץ לא נתמך (JPG, PNG או WEBP בלבד)');
     }
 
+    return this.put(file.buffer, file.mimetype, ext, dressId);
+  }
+
+  /**
+   * Copies a remote image into our bucket and returns its public URL.
+   *
+   * Exists for the AI photo flow: FASHN hands back a URL on its own CDN which
+   * expires after three days and is outside our control. Persisting a copy is
+   * what makes a generated photo a real listing photo like any other — same
+   * bucket, same public URL shape, so nothing downstream can tell the
+   * difference (the `isAiGenerated` flag on DressImage is what marks it).
+   *
+   * Validates the fetched bytes against the same MIME/size rules as a user
+   * upload, because the bucket enforces them regardless of who is calling.
+   */
+  async uploadFromUrl(sourceUrl: string, dressId = 'pending'): Promise<string> {
+    let res: Response;
+    try {
+      res = await fetch(sourceUrl);
+    } catch (err) {
+      this.logger.error(`Could not fetch generated image ${sourceUrl}`, err as Error);
+      throw new InternalServerErrorException('שמירת התמונה שנוצרה נכשלה');
+    }
+    if (!res.ok) {
+      this.logger.error(
+        `Generated image fetch returned ${res.status} for ${sourceUrl}`,
+      );
+      throw new InternalServerErrorException('שמירת התמונה שנוצרה נכשלה');
+    }
+
+    // Trust the response's declared type, but fall back to jpeg: fal's CDN
+    // occasionally serves `application/octet-stream`, and the request asked
+    // for jpeg output.
+    const declared = (res.headers.get('content-type') || '').split(';')[0].trim();
+    const mimetype = ALLOWED_MIME[declared] ? declared : 'image/jpeg';
+
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (!buffer.length) {
+      throw new InternalServerErrorException('התמונה שנוצרה ריקה');
+    }
+    if (buffer.length > MAX_BYTES) {
+      throw new InternalServerErrorException('התמונה שנוצרה גדולה מ-10MB');
+    }
+
+    return this.put(buffer, mimetype, ALLOWED_MIME[mimetype], dressId);
+  }
+
+  /** Shared write path for both upload entry points. */
+  private async put(
+    buffer: Buffer,
+    mimetype: string,
+    ext: string,
+    dressId: string,
+  ): Promise<string> {
     const objectPath = `${dressId}/${randomUUID()}.${ext}`;
     const endpoint = `${this.baseUrl}/storage/v1/object/${BUCKET}/${objectPath}`;
 
@@ -89,10 +143,10 @@ export class StorageService {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${this.serviceKey}`,
-          'Content-Type': file.mimetype,
+          'Content-Type': mimetype,
           'x-upsert': 'false',
         },
-        body: new Uint8Array(file.buffer),
+        body: new Uint8Array(buffer),
       });
     } catch (err) {
       this.logger.error(`Storage upload failed for ${objectPath}`, err as Error);

@@ -126,12 +126,25 @@ model DressSize {
   @@index([dressId])
 }
 
+// NOTE ON THE PRIMARY/COVER PHOTO: there is no `isPrimary` flag and no
+// `coverImageId` on Dress — the cover is whichever row has the lowest
+// `order`, i.e. `images[0]` in the client shape. Every consumer already
+// relies on that (AdminPage's row thumbnail, the gallery card, the detail
+// page's lead image), so the AI photo feature reuses it: promoting a
+// generated photo to cover means giving it order 0 and shifting the rest,
+// not introducing a second source of truth.
 model DressImage {
   id      String @id @default(uuid())
   dress   Dress  @relation(fields: [dressId], references: [id], onDelete: Cascade)
   dressId String
   url     String
   order   Int
+  // True for photos produced by the admin-only AI on-model photo tool
+  // (AiPhotoService) rather than uploaded by the lister. Purely presentational
+  // — it drives the "AI" badge in the admin grid so the admin can tell a
+  // generated photo from an original upload. Nothing customer-facing branches
+  // on it.
+  isAiGenerated Boolean @default(false)
 
   @@index([dressId])
 }

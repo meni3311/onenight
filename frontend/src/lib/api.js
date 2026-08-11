@@ -73,6 +73,26 @@ export async function api(path, { method = "GET", body, adminPw } = {}) {
 }
 
 /**
+ * Admin-only: turn selected listing photos into AI on-model photos.
+ *
+ * Resolves with one entry per requested image —
+ * `{ sourceImageId, generatedImageUrl, status, error? }` — and a mix of
+ * successes and errors is a normal outcome, not a thrown one. It only rejects
+ * if the request itself failed (bad password, unknown dress, network).
+ *
+ * Slower than every other call in this file: it's one metered generation per
+ * image, run concurrently server-side but still ~10s each. Callers should show
+ * per-thumbnail progress rather than a blocking spinner.
+ */
+export function aiGenerateDressPhotos(dressId, imageIds, adminPw) {
+  return api(`/api/admin/dresses/${encodeURIComponent(dressId)}/ai-generate`, {
+    method: "POST",
+    adminPw,
+    body: { imageIds },
+  });
+}
+
+/**
  * Upload one listing photo and get back its public Supabase Storage URL.
  * Sent as multipart rather than JSON — the bytes never pass through the
  * dress record, only the resulting URL does.

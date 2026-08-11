@@ -1064,6 +1064,72 @@ input[type=range] { accent-color: var(--rose); }
 .thumb-reorder button:disabled { opacity: 0.35; }
 .err { color: #b5524f; font-size: 11px; letter-spacing: 0.02em; margin-top: 3px; }
 
+/* ---------- AI Imagine panel (admin-only virtual try-on) ----------
+   Deliberately NOT reusing .thumb: that class's descendant `button` rule
+   styles a small circular remove control, and here the thumbnail *itself*
+   is the button. Same 80x108 footprint so the two grids line up visually
+   when both panels are open on the same listing. */
+.ai-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 10px);
+  padding: 14px;
+  background: var(--surface);
+}
+.ai-thumb-wrap { width: 80px; }
+.ai-thumb {
+  position: relative;
+  display: block;
+  width: 80px; height: 108px;
+  padding: 0;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  /* 2px at rest so the selected state doesn't reflow the grid. */
+  border: 2px solid var(--border);
+  background: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ai-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ai-thumb:hover:not(:disabled) { border-color: var(--rose); }
+.ai-thumb.on { border-color: var(--rose-deep); box-shadow: 0 0 0 2px var(--rose-pale); }
+.ai-thumb.failed { border-color: #b5524f; }
+.ai-thumb:disabled { cursor: default; }
+/* Selection must not rely on the border alone — that's colour-only signalling,
+   invisible to anyone who can't distinguish it. The check is the real cue. */
+.ai-thumb.on::after {
+  content: "✓";
+  position: absolute;
+  top: 4px; inset-inline-start: 4px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--rose-deep); color: #fff;
+  font-size: 11px; line-height: 18px; text-align: center;
+}
+.ai-badge {
+  position: absolute;
+  bottom: 4px; inset-inline-end: 4px;
+  background: rgba(36,24,24,0.78); color: #fff;
+  font-size: 9px; font-weight: 600; letter-spacing: 0.08em;
+  padding: 2px 6px; border-radius: var(--r-xs, 4px);
+}
+.ai-thumb-busy {
+  position: absolute; inset: 0;
+  background: rgba(255,255,255,0.72);
+  display: flex; align-items: center; justify-content: center;
+}
+.ai-spinner {
+  width: 22px; height: 22px;
+  border: 2px solid var(--rose-pale);
+  border-top-color: var(--rose-deep);
+  border-radius: 50%;
+  animation: ai-spin 0.7s linear infinite;
+}
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .ai-spinner { animation-duration: 2.4s; }
+}
+.ai-thumb-err { display: block; width: 80px; line-height: 1.3; }
+
 /* ---------- Notice boxes (legal/fee disclosures shown inline on a page,
    e.g. PublishPage's liability + platform-fee notices — replaces the old
    confirm-popup pattern for this kind of text) ---------- */

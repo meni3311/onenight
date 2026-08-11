@@ -10,7 +10,6 @@ export const CONDITIONS = ["חדשה","כמו חדשה","טובה מאוד","ט�
    has been removed — this is now the single source of truth. */
 export const DRESS_LENGTHS = ["קצר","אמצע","ארוך"];
 export const SLEEVE_LENGTHS = ["קצר","אמצע","ארוך"];
-export const ADMIN_PASSWORD = "onenight2026"; // demo only — replace with real auth
 
 /* ---------- Soft SVG placeholder (always works offline) ---------- */
 export function placeholder(color, label){
