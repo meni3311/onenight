@@ -7,6 +7,7 @@ import {
 import { Prisma, User } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { DressesService } from '../dresses/dresses.service';
 
 type PublicUser = Omit<User, 'password'>;
 
@@ -24,7 +25,10 @@ function isUniqueViolation(error: unknown): boolean {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly dresses: DressesService,
+  ) {}
 
   private strip(u: User): PublicUser {
     const { password, ...rest } = u;
@@ -146,5 +150,52 @@ export class UsersService {
       data: { name: data.name, city: data.city },
     });
     return this.strip(updated);
+  }
+
+  /**
+   * Self-service account deletion. The caller (UsersController) has already
+   * proven ownership of `email` via OtpService.verifyOtp before this runs —
+   * same correlated verify-then-act pattern as verify-registration and
+   * reset-password, so an account can never be removed without a valid code
+   * for that email.
+   *
+   * Order matters:
+   *   1. Every listing this user owns, plus its stored images, is
+   *      hard-deleted via DressesService.deleteAllByOwner — the same
+   *      cleanup the owner's own "delete my listing" flow does, just for
+   *      all of them at once. That cascades away everything hanging off
+   *      those specific Dress rows (images, sizes, availability, and any
+   *      Booking/Review/Favorite rows scoped to those listings).
+   *   2. Booking/Review/Favorite rows where this user is the *other* party
+   *      (a booking they made on someone else's dress, a review they wrote,
+   *      a favorite on someone else's listing) are hard-deleted too. Nothing
+   *      in the app writes these tables today — Booking is dormant
+   *      request/response infrastructure with no live create path, and
+   *      favorites are README-documented as localStorage-only — so this
+   *      step only guards against a manually-seeded row blocking the delete
+   *      with a foreign-key violation; it isn't expected to remove anything
+   *      in practice.
+   *   3. BookingInquiry rows where this user is the renter are DELIBERATELY
+   *      LEFT IN PLACE, same reasoning as DressesService.deleteDress: each
+   *      is a self-contained snapshot (phone, dress title, dates) the admin
+   *      queue still needs after the account is gone. `renterId` is
+   *      ON DELETE SET NULL (see the BookingInquiry migration), so step 4
+   *      nulls it out at the database level — nothing to do here for it.
+   *   4. The user row itself.
+   */
+  async deleteAccount(email: string): Promise<void> {
+    const user = await this.findByEmail(email);
+    if (!user) throw new NotFoundException('משתמשת לא נמצאה');
+
+    await this.dresses.deleteAllByOwner(user.id);
+
+    await this.prisma.$transaction([
+      this.prisma.booking.deleteMany({
+        where: { OR: [{ renterId: user.id }, { listerId: user.id }] },
+      }),
+      this.prisma.review.deleteMany({ where: { reviewerId: user.id } }),
+      this.prisma.favorite.deleteMany({ where: { userId: user.id } }),
+      this.prisma.user.delete({ where: { id: user.id } }),
+    ]);
   }
 }

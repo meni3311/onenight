@@ -238,8 +238,15 @@ model Review {
 model BookingInquiry {
   id          String @id @default(uuid())
 
-  renterId    String
-  renter      User   @relation("bookingInquiries", fields: [renterId], references: [id])
+  // Nullable, with onDelete: SetNull — so a renter deleting their account
+  // (UsersService.deleteAccount) doesn't get blocked by this FK and doesn't
+  // need this row deleted either. The row is already a self-contained
+  // snapshot (renterPhone/dressTitle/ownerPhone/dates captured at click
+  // time), same reasoning as Dress deletion leaving inquiries behind — see
+  // DressesService.deleteDress — so losing the link to a deleted account
+  // loses nothing the admin queue actually reads.
+  renterId    String?
+  renter      User?  @relation("bookingInquiries", fields: [renterId], references: [id], onDelete: SetNull)
   renterPhone String // snapshot at click-time, independent of later profile edits
 
   dressId     String // the mock system's dress id — app already routes to dress detail by this id

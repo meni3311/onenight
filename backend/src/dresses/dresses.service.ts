@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -78,6 +79,16 @@ const CLIENT_INCLUDE = {
 } satisfies Prisma.DressInclude;
 
 type DressWithRelations = Prisma.DressGetPayload<{ include: typeof CLIENT_INCLUDE }>;
+
+/**
+ * Ceiling on photos per listing, enforced when the admin adds one.
+ *
+ * Matches the `max` passed to ImageUploader on the admin screen. The publish
+ * form's own limit is lower (3) and independent — that one is about not
+ * overwhelming a first-time lister, this one is about what a gallery can
+ * usefully show. AI generations append into the same set and count against it.
+ */
+export const MAX_GALLERY_IMAGES = 8;
 
 /** `Date` -> "YYYY-MM-DD", in UTC so a day never shifts across timezones. */
 function toDateKey(d: Date): string {
@@ -410,6 +421,160 @@ export class DressesService {
     }
 
     return results;
+  }
+
+  /**
+   * How many booking inquiries reference this dress.
+   *
+   * Feeds the warning in the owner's delete confirmation. `BookingInquiry`
+   * has no foreign key to `Dress` (its dressId is a plain column — see the
+   * model's own note), so this is a count, not a relation traversal, and
+   * these rows are NOT removed when the dress is.
+   */
+  async countInquiries(dressId: string): Promise<number> {
+    return this.prisma.bookingInquiry.count({ where: { dressId } });
+  }
+
+  /**
+   * Owner-initiated deletion of their own listing.
+   *
+   * OWNERSHIP: verified by matching `requesterEmail` against the listing's
+   * own `email`, the same weak-but-consistent rule `createDress` uses to
+   * resolve an owner and `AccountPage` uses to decide which listings are
+   * "mine". This app has no bearer token — the login endpoints return a user
+   * object and nothing signs subsequent requests — so an email match is the
+   * strongest check available here without introducing real sessions. It
+   * stops the accidental and the casual, not someone who knows another
+   * lister's address. Tighten this when real auth lands.
+   *
+   * BOOKING INQUIRIES ARE DELIBERATELY LEFT BEHIND. Each inquiry row is a
+   * self-contained snapshot (dress title, both phone numbers, requested
+   * dates) captured at click time precisely so it outlives the listing, and
+   * the admin queue already renders "השמלה כבר לא זמינה" for a missing
+   * dress. Cascading them would destroy a renter's pending request and the
+   * admin's ability to follow it up. The owner is told the count before
+   * confirming, so this is disclosed rather than silent.
+   *
+   * Everything else hangs off `Dress` with onDelete: Cascade (images, sizes,
+   * availability, bookings, reviews, favourites) and goes with the row.
+   */
+  async deleteDress(id: string, requesterEmail: string): Promise<void> {
+    const dress = await this.prisma.dress.findUnique({
+      where: { id },
+      select: { id: true, email: true, images: { select: { url: true } } },
+    });
+    if (!dress) throw new NotFoundException('השמלה לא נמצאה');
+
+    const owner = (dress.email || '').trim().toLowerCase();
+    const requester = (requesterEmail || '').trim().toLowerCase();
+    if (!owner || owner !== requester) {
+      throw new ForbiddenException('אפשר למחוק רק מודעות שפרסמת');
+    }
+
+    // Storage first: if the row went first and this failed, the URLs needed
+    // to find these objects would already be gone and the files unreachable
+    // forever. deleteByPublicUrl never throws, so a Storage problem can't
+    // block the deletion itself.
+    await Promise.all(dress.images.map((img) => this.storage.deleteByPublicUrl(img.url)));
+
+    await this.prisma.dress.delete({ where: { id } });
+  }
+
+  /**
+   * Bulk owner deletion — every listing this owner has, hard-deleted with
+   * their stored images. Only caller is UsersService.deleteAccount: unlike
+   * `deleteDress`, there is no per-request email to check against, because
+   * by the time this runs the account itself (and thus its ownership) has
+   * already been resolved and is about to be removed. Same storage-then-row
+   * order as `deleteDress`, and for the same reason: if the row went first
+   * and this failed, the URLs needed to find those files would already be
+   * gone.
+   */
+  async deleteAllByOwner(ownerId: string): Promise<void> {
+    const dresses = await this.prisma.dress.findMany({
+      where: { ownerId },
+      select: { images: { select: { url: true } } },
+    });
+    await Promise.all(
+      dresses.flatMap((d) =>
+        d.images.map((img) => this.storage.deleteByPublicUrl(img.url)),
+      ),
+    );
+    await this.prisma.dress.deleteMany({ where: { ownerId } });
+  }
+
+  /**
+   * Admin: drop one photo from a listing's gallery.
+   *
+   * Refuses the last one — every consumer renders `images[0]` as the card
+   * thumbnail and the detail page's lead image, so a listing with an empty
+   * gallery renders as a broken image everywhere it appears.
+   *
+   * Re-packs `order` afterwards so the sequence stays 0..n-1 with no holes.
+   * Nothing reads `order` numerically beyond sorting, but leaving gaps makes
+   * the "lowest order is the cover" rule harder to reason about, and removing
+   * the current cover has to promote the next photo cleanly.
+   */
+  async removeImage(dressId: string, imageId: string): Promise<ClientDress> {
+    const images = await this.prisma.dressImage.findMany({
+      where: { dressId },
+      orderBy: { order: 'asc' },
+      select: { id: true, url: true },
+    });
+    if (images.length === 0) throw new NotFoundException('השמלה לא נמצאה');
+
+    const target = images.find((img) => img.id === imageId);
+    if (!target) throw new NotFoundException('התמונה לא נמצאה');
+
+    if (images.length === 1) {
+      throw new BadRequestException(
+        'לא ניתן למחוק את התמונה האחרונה — לכל שמלה חייבת להיות לפחות תמונה אחת',
+      );
+    }
+
+    await this.storage.deleteByPublicUrl(target.url);
+
+    const remaining = images.filter((img) => img.id !== imageId);
+    await this.prisma.$transaction([
+      this.prisma.dressImage.delete({ where: { id: imageId } }),
+      ...remaining.map((img, order) =>
+        this.prisma.dressImage.update({ where: { id: img.id }, data: { order } }),
+      ),
+    ]);
+
+    return this.getDressById(dressId);
+  }
+
+  /**
+   * Admin: append an already-uploaded photo to a listing's gallery.
+   *
+   * Takes a URL rather than the file itself because the upload already has a
+   * home — the frontend posts the bytes to `POST /api/dresses/images` (same
+   * path the publish form uses) and passes the resulting public URL here.
+   * That keeps one upload implementation instead of a second admin-only one.
+   *
+   * The cap is re-checked here and not only in the UI: the UI disables the
+   * button, but the endpoint is what actually has to hold the line.
+   */
+  async addImage(dressId: string, url: string): Promise<ClientDress> {
+    await this.assertDressExists(dressId);
+
+    const last = await this.prisma.dressImage.findFirst({
+      where: { dressId },
+      orderBy: { order: 'desc' },
+      select: { order: true },
+    });
+    const count = await this.prisma.dressImage.count({ where: { dressId } });
+    if (count >= MAX_GALLERY_IMAGES) {
+      throw new BadRequestException(
+        `הגלריה מלאה — עד ${MAX_GALLERY_IMAGES} תמונות לשמלה`,
+      );
+    }
+
+    await this.prisma.dressImage.create({
+      data: { dressId, url, order: (last?.order ?? -1) + 1 },
+    });
+    return this.getDressById(dressId);
   }
 
   /** Dresses sharing this one's colour or source, excluding itself. */

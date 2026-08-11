@@ -1,8 +1,13 @@
-import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AdminGuard } from '../common/admin.guard';
-import { AiGenerationResult, DressesService } from './dresses.service';
+import {
+  AiGenerationResult,
+  ClientDress,
+  DressesService,
+} from './dresses.service';
 import { AiGenerateDto } from './dto/ai-generate.dto';
+import { AddImageDto } from './dto/add-image.dto';
 
 /**
  * Admin-only operations on a dress that don't belong on the public
@@ -43,5 +48,35 @@ export class AdminDressesController {
     @Body() dto: AiGenerateDto,
   ): Promise<AiGenerationResult[]> {
     return this.service.generateAiPhotos(dressId, dto.imageIds);
+  }
+
+  /**
+   * Append a photo to the gallery. The bytes are uploaded separately through
+   * `POST /api/dresses/images` first; this records the resulting URL.
+   *
+   * Both this and the delete below return the whole updated dress rather than
+   * a bare 204, so the admin screen can re-render from one response instead of
+   * following every mutation with a refetch.
+   */
+  @Post(':dressId/images')
+  @ApiOperation({ summary: "Admin: add an uploaded photo to a dress's gallery" })
+  addImage(
+    @Param('dressId') dressId: string,
+    @Body() dto: AddImageDto,
+  ): Promise<ClientDress> {
+    return this.service.addImage(dressId, dto.url);
+  }
+
+  /**
+   * Remove one photo from the gallery and from Storage. Rejects an attempt to
+   * remove the last remaining photo — see DressesService.removeImage.
+   */
+  @Delete(':dressId/images/:imageId')
+  @ApiOperation({ summary: "Admin: delete one photo from a dress's gallery" })
+  removeImage(
+    @Param('dressId') dressId: string,
+    @Param('imageId') imageId: string,
+  ): Promise<ClientDress> {
+    return this.service.removeImage(dressId, imageId);
   }
 }

@@ -11,6 +11,7 @@ export function ConfirmModal({
   open,
   title,
   message,
+  children,
   confirmLabel = "אישור",
   cancelLabel = "ביטול",
   onConfirm,
@@ -88,6 +89,12 @@ export function ConfirmModal({
             {message}
           </p>
         )}
+
+        {/* Optional extra content between the message and the buttons — e.g.
+            a code-entry field for a confirmation that needs one, like
+            account deletion's OTP step. Nothing renders here unless a
+            caller passes children, so every existing usage is unaffected. */}
+        {children && <div style={{ marginTop: "16px", textAlign: "start" }}>{children}</div>}
 
         <div className="flex flex-col" style={{ gap: "12px", marginTop: "24px" }}>
           <button

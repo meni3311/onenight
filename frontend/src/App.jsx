@@ -153,6 +153,10 @@ export default function App() {
   const onAuth = (u) => { setUser(u); setRoute("account"); toast("ברוכה הבאה, " + u.name + " 🌸"); };
   const logout = () => { setUser(null); go("home"); toast("התנתקת בהצלחה"); };
 
+  /* Rethrows after toasting. The toast is this function's job (it owns the
+     app-level error surface), but PublishPage needs to know the call failed
+     so it can clear its submit-button spinner and let the user retry —
+     swallowing the error here left the button stuck spinning forever. */
   const publish = async (data) => {
     try {
       const created = await api("/api/dresses", { method: "POST", body: data });
@@ -161,6 +165,7 @@ export default function App() {
       window.scrollTo({ top: 0 });
     } catch (e) {
       toast("פרסום נכשל: " + e.message);
+      throw e;
     }
   };
 

@@ -215,6 +215,36 @@ img { display: block; }
 }
 .btn-ghost:hover { border-color: var(--rose); color: var(--rose-deep); }
 .btn-block { width: 100%; }
+/* In-button spinner for submit actions that wait on the network.
+   `currentColor` rather than a fixed bordeaux so it reads correctly on every
+   button variant — white on .btn-rose/.btn-sage, dark on .btn-ghost — without
+   a per-variant override. Sized to the 10px uppercase label it sits beside.
+   Distinct from .auth-spinner, which is bordeaux-on-glass inside the auth
+   modal and is 34px; this one has to fit inline in a button row. */
+.btn-spinner {
+  display: inline-block;
+  width: 13px; height: 13px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-right-color: currentColor;
+  border-radius: 50%;
+  animation: btn-spin 0.65s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .btn-spinner { animation-duration: 2.2s; }
+}
+/* The disabled state has to be visible: without it a submitted form looks
+   identical to an idle one, which is what invites the second click. */
+.btn:disabled { opacity: 0.6; cursor: default; }
+.btn:disabled:hover { background: inherit; }
+/* Destructive action sitting among neutral ones (e.g. delete alongside
+   edit/view). Stays a ghost button so it doesn't outweigh the primary
+   action on the row — the colour is the whole signal, and it only commits
+   to the red on hover. */
+.btn-danger { color: #b5524f; }
+.btn-danger:hover { border-color: #b5524f; color: #8f3f3d; background: rgba(181, 82, 79, 0.06); }
 .btn-icon {
   width: 40px; height: 40px;
   padding: 0;
@@ -1064,7 +1094,11 @@ input[type=range] { accent-color: var(--rose); }
 .thumb-reorder button:disabled { opacity: 0.35; }
 .err { color: #b5524f; font-size: 11px; letter-spacing: 0.02em; margin-top: 3px; }
 
-/* ---------- AI Imagine panel (admin-only virtual try-on) ----------
+/* ---------- Admin photos panel (add / remove / AI on-model) ----------
+   Class names keep the `ai-` prefix from when this panel only did AI
+   generation; it now covers the whole per-image gallery. Left as-is rather
+   than renamed to avoid a churn-only diff across every rule below.
+
    Deliberately NOT reusing .thumb: that class's descendant `button` rule
    styles a small circular remove control, and here the thumbnail *itself*
    is the button. Same 80x108 footprint so the two grids line up visually
@@ -1075,7 +1109,55 @@ input[type=range] { accent-color: var(--rose); }
   padding: 14px;
   background: var(--surface);
 }
-.ai-thumb-wrap { width: 80px; }
+/* Relative so the remove button and cover badge can sit over the thumb.
+   The remove control has to be a sibling of the thumb button, not a child —
+   nested buttons are invalid HTML and swallow the inner click. */
+.ai-thumb-wrap { width: 80px; position: relative; }
+.ai-thumb-remove {
+  position: absolute;
+  top: -6px; inset-inline-start: -6px;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: #b5524f;
+  font-size: 10px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  z-index: 1;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.ai-thumb-remove:hover:not(:disabled) { background: #b5524f; color: #fff; border-color: #b5524f; }
+/* Disabled on the last remaining photo — visibly present but inert, so the
+   rule ("a dress must keep at least one photo") is discoverable via its
+   tooltip rather than the button just vanishing. */
+.ai-thumb-remove:disabled { opacity: 0.3; cursor: default; }
+/* Mirrors .ai-thumb-remove on the opposite top corner — same footprint,
+   neutral (non-destructive) colour. */
+.ai-thumb-download {
+  position: absolute;
+  top: -6px; inset-inline-end: -6px;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 10px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  z-index: 1;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.ai-thumb-download:hover:not(:disabled) { background: var(--rose-deep); color: #fff; border-color: var(--rose-deep); }
+.ai-thumb-download:disabled { opacity: 0.5; cursor: default; }
+.ai-thumb-cover {
+  display: block;
+  margin-top: 3px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-align: center;
+  color: var(--muted);
+}
 .ai-thumb {
   position: relative;
   display: block;

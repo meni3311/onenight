@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { placeholder } from "../lib/data.js";
 import { api } from "../lib/api.js";
-import { ImageUploader } from "../components/ui/ImageUploader.jsx";
-import { AiImaginePanel } from "../components/admin/AiImaginePanel.jsx";
+import { AdminPhotosPanel } from "../components/admin/AdminPhotosPanel.jsx";
+import { useSessionStorage } from "../hooks/useSessionStorage.js";
 
 const STATUS_LABELS = { approved: "מאושרת", pending: "ממתינה", rejected: "נדחתה" };
 const TABS = [["pending", "ממתינות"], ["approved", "מאושרות"], ["rejected", "נדחו"]];
@@ -29,17 +29,26 @@ const fmtDate = (iso) => new Date(iso).toLocaleDateString("he-IL");
 
 /* Owner-only moderation panel: approve / reject submitted dresses. */
 export default function AdminPage({ dresses, setDresses, toast, dressById, onOpen }) {
+  /* The admin "session" is the password itself — AdminGuard re-checks it on
+     every privileged call and no token is ever issued (see admin.guard.ts),
+     so there is nothing else to persist. Held in sessionStorage rather than
+     React state so a refresh doesn't drop it, and rather than localStorage
+     so it doesn't outlive the tab; see useSessionStorage for that tradeoff.
+
+     `authed` is intentionally NOT persisted alongside it. It's derived on
+     mount by re-validating the stored password (see below), so a password
+     that has since changed server-side can't leave the screen rendering a
+     queue whose every action will 401. */
+  const [pw, setPw] = useSessionStorage("onenight_admin_pw", "");
   const [authed, setAuthed] = useState(false);
-  const [pw, setPw] = useState("");
+  /* Blocks the login form for the one round trip that re-validation takes,
+     so a returning admin doesn't see the password prompt flash before the
+     panel appears. */
+  const [rehydrating, setRehydrating] = useState(() => !!pw);
   const [tab, setTab] = useState("pending");
   const [rejecting, setRejecting] = useState(null);
   const [reason, setReason] = useState("");
-  const [editingImages, setEditingImages] = useState(null); // dress id currently being edited
-  const [draftImages, setDraftImages] = useState([]);
-  // Dress id whose AI photo panel is open. Separate from `editingImages` and
-  // mutually exclusive with it — the two panels edit the same photo set from
-  // opposite ends (a draft array saved on demand vs. immediate writes), so
-  // having both open invites saving a stale draft over a fresh generation.
+  // Dress id whose AI photo / manage-images panel is open.
   const [aiImagining, setAiImagining] = useState(null);
 
   // Booking inquiries ("להזמנה" click log) — lazily loaded from the real
@@ -66,6 +75,41 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, authed]);
 
+  /* Rehydrate the admin session on mount.
+     The stored password is re-checked against the server rather than
+     trusted, so it can't outlive a change to ADMIN_PASSWORD — that check is
+     this app's stand-in for token expiry, since the guard has no notion of
+     one. A rejected or errored password is cleared, dropping the admin back
+     to the login form instead of into a panel where every button 401s.
+     Runs once; the login form handles the interactive path. */
+  useEffect(() => {
+    if (!pw) { setRehydrating(false); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api("/api/admin/login", { method: "POST", body: { password: pw } });
+        if (cancelled) return;
+        if (r && r.ok) setAuthed(true);
+        else setPw("");
+      } catch {
+        // Network failure, not a wrong password — clear anyway rather than
+        // showing a panel we can't confirm is authorised.
+        if (!cancelled) setPw("");
+      } finally {
+        if (!cancelled) setRehydrating(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const adminLogout = () => {
+    setPw("");
+    setAuthed(false);
+    setInquiries([]);
+    toast("יצאת מפאנל הניהול");
+  };
+
   const deleteInquiry = async (id) => {
     try {
       const res = await fetch("/api/booking-inquiries/" + id, {
@@ -79,6 +123,12 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
       toast("מחיקת הבקשה נכשלה: " + e.message);
     }
   };
+
+  /* Held back until the stored password has been re-validated, so a refresh
+     goes straight to the panel instead of flashing the login form first. */
+  if (rehydrating) return (
+    <div className="container page pt-[50px]"><div className="empty">טוענת…</div></div>
+  );
 
   if (!authed) return (
     <div className="container page pt-[50px]">
@@ -116,26 +166,18 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
     } catch (e) { toast("דחייה נכשלה: " + e.message); }
   };
 
-  /* Edit the images on a listing request — same `images` field the listing
-     itself renders from, so once approved the edited set is what's live. */
-  const startEditingImages = (d) => { setAiImagining(null); setEditingImages(d.id); setDraftImages(d.images); };
-  const cancelEditingImages = () => { setEditingImages(null); setDraftImages([]); };
   const toggleAiImagining = (d) => {
-    setEditingImages(null); setDraftImages([]);
     setAiImagining((p) => (p === d.id ? null : d.id));
-  };
-  const saveImages = async () => {
-    try {
-      const up = await api("/api/dresses/" + editingImages, { method: "PATCH", body: { images: draftImages } });
-      setDresses((p) => p.map((x) => (x.id === up.id ? up : x)));
-      toast("התמונות עודכנו ✓");
-      setEditingImages(null); setDraftImages([]);
-    } catch (e) { toast("עדכון התמונות נכשל: " + e.message); }
   };
 
   return (
     <div className="container page pt-[30px]">
-      <h2 className="section-title">פאנל ניהול</h2>
+      {/* Explicit logout matters now that the session survives a refresh —
+          without it the only way out is closing the tab. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="section-title">פאנל ניהול</h2>
+        <button className="btn btn-ghost" onClick={adminLogout}>יציאה</button>
+      </div>
       <div className="tabs">
         {TABS.map(([k, l]) => (
           <button key={k} className={"tab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>
@@ -203,25 +245,12 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
                 {d.status !== "approved" && <button className="btn btn-sage" onClick={() => approve(d)}>✅ אישור</button>}
                 {d.status !== "rejected" && <button className="btn btn-ghost" onClick={() => setRejecting(d)}>❌ דחייה</button>}
                 <a className="btn btn-ghost" href={wa} target="_blank" rel="noopener">📱 בקשת תמונה</a>
-                {editingImages === d.id
-                  ? <button className="btn btn-ghost" onClick={cancelEditingImages}>ביטול עריכת תמונות</button>
-                  : <button className="btn btn-ghost" onClick={() => startEditingImages(d)}>🖼️ עריכת תמונות</button>}
                 <button className="btn btn-ghost" onClick={() => toggleAiImagining(d)}>
-                  {aiImagining === d.id ? "סגירת AI Imagine" : "✨ AI Imagine"}
+                  {aiImagining === d.id ? "סגירת ניהול תמונות" : "🖼️ ניהול תמונות"}
                 </button>
               </div>
-              {/* max is 8 here, not the publish form's 3: AI generations are
-                  appended to this same gallery, so a 3-photo ceiling would
-                  reject the results of a multi-select. */}
-              {editingImages === d.id && <div className="mt-2.5">
-                <ImageUploader images={draftImages} setImages={setDraftImages} max={8} />
-                <div className="mt-2 flex gap-2">
-                  <button className="btn btn-sage" onClick={saveImages} disabled={draftImages.length === 0}>שמירת תמונות</button>
-                  <button className="btn btn-ghost" onClick={cancelEditingImages}>ביטול</button>
-                </div>
-              </div>}
               {aiImagining === d.id && <div className="mt-2.5">
-                <AiImaginePanel
+                <AdminPhotosPanel
                   dress={d}
                   adminPw={pw}
                   toast={toast}

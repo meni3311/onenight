@@ -127,6 +127,59 @@ export class StorageService {
     return this.put(buffer, mimetype, ALLOWED_MIME[mimetype], dressId);
   }
 
+  /**
+   * Removes the stored object behind a public URL. Best-effort by design.
+   *
+   * BEST-EFFORT IS DELIBERATE: callers delete the database row too, and the
+   * row is the source of truth for what a listing shows. If the bucket
+   * delete fails, the worst outcome is an unreferenced file costing storage;
+   * if we threw instead, a transient Storage error would block the user from
+   * deleting their own listing, which is the far worse failure. Failures are
+   * logged so they can be swept up later.
+   *
+   * Silently ignores URLs that don't belong to our bucket. Listings created
+   * before the Supabase migration can still hold external URLs (and base64
+   * data URLs), and those have nothing for us to delete.
+   */
+  async deleteByPublicUrl(url: string): Promise<void> {
+    const objectPath = this.objectPathFromPublicUrl(url);
+    if (!objectPath) return;
+
+    const endpoint = `${this.baseUrl}/storage/v1/object/${BUCKET}/${objectPath}`;
+    try {
+      const res = await fetch(endpoint, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${this.serviceKey}` },
+      });
+      // 404 means it's already gone — that's the desired end state, not a
+      // failure worth logging.
+      if (!res.ok && res.status !== 404) {
+        const detail = await res.text().catch(() => '');
+        this.logger.warn(
+          `Storage delete failed for ${objectPath}: ${res.status} ${res.statusText} ${detail}`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(`Storage delete threw for ${objectPath}`, err as Error);
+    }
+  }
+
+  /**
+   * Inverse of the URL built at the end of `put`. Returns null when `url`
+   * isn't a public URL for this project's bucket.
+   *
+   * Compared against our own configured base URL rather than pattern-matched
+   * loosely, so a URL pointing at some other Supabase project can't be
+   * coerced into a delete against ours.
+   */
+  private objectPathFromPublicUrl(url: string): string | null {
+    if (!url) return null;
+    const prefix = `${this.baseUrl}/storage/v1/object/public/${BUCKET}/`;
+    if (!url.startsWith(prefix)) return null;
+    const path = url.slice(prefix.length).split('?')[0];
+    return path || null;
+  }
+
   /** Shared write path for both upload entry points. */
   private async put(
     buffer: Buffer,

@@ -27,6 +27,8 @@ export default function PublishPage({ onSubmit, goHome }) {
      flow, rather than a plain "read-only, no action needed" notice. */
   const [agreeLiability, setAgreeLiability] = useState(false);
   const [agreeFee, setAgreeFee] = useState(false);
+  /* In flight between clicking "פרסום השמלה" and the POST resolving. */
+  const [submitting, setSubmitting] = useState(false);
   const set = (k, val) => setV((p) => ({ ...p, [k]: val }));
 
   /* Ownership is keyed by the account's email (see AccountPage's "my
@@ -60,11 +62,28 @@ export default function PublishPage({ onSubmit, goHome }) {
   };
   /* No more confirm-popup gate — the two notice boxes below (liability +
      fee) are read directly on the page and required via their own
-     checkboxes, so a valid submit here goes straight through. */
-  const submit = () => {
+     checkboxes, so a valid submit here goes straight through.
+
+     Awaited so the button can hold a spinner for the round trip. The guard
+     on `submitting` is the real double-submit protection, not the button's
+     `disabled` attribute: Enter-to-submit and a fast double-click can both
+     re-enter this before React has repainted the disabled state, and a
+     duplicate POST here means a duplicate listing in the moderation queue.
+
+     onSubmit rethrows on failure (see App.jsx's publish) — it has already
+     shown the toast, so there's nothing to report here beyond releasing the
+     button. On success it navigates away and this component unmounts, which
+     is why `submitting` is never cleared on the happy path. */
+  const submit = async () => {
+    if (submitting) return;
     if (!validate()) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
-    /* Phone is contact info only — never used to match ownership. */
-    onSubmit({ ...v, phone: normalizePhone(v.phone), price: +v.price, images, colorHex: DEFAULT_DRESS_COLOR_HEX });
+    setSubmitting(true);
+    try {
+      /* Phone is contact info only — never used to match ownership. */
+      await onSubmit({ ...v, phone: normalizePhone(v.phone), price: +v.price, images, colorHex: DEFAULT_DRESS_COLOR_HEX });
+    } catch {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -179,7 +198,9 @@ export default function PublishPage({ onSubmit, goHome }) {
               {errors.fee && <span className="err">{errors.fee}</span>}
             </div>
 
-            <button className="btn btn-rose btn-block" onClick={submit}>פרסום השמלה</button>
+            <button className="btn btn-rose btn-block" onClick={submit} disabled={submitting} aria-busy={submitting}>
+              {submitting ? <><span className="btn-spinner" aria-hidden="true" />מפרסמת…</> : "פרסום השמלה"}
+            </button>
             <div className="mt-[14px] text-center"><span className="link-rose" onClick={goHome}>חזרה לעמוד הבית</span></div>
           </div>
         </div>

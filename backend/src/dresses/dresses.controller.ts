@@ -2,7 +2,9 @@ import {
   Body,
   Controller,
   DefaultValuePipe,
+  Delete,
   Get,
+  HttpCode,
   Param,
   ParseIntPipe,
   Patch,
@@ -20,6 +22,7 @@ import { StorageService, UploadedImage } from './storage.service';
 import { CreateDressDto } from './dto/create-dress.dto';
 import { UpdateDressDto } from './dto/update-dress.dto';
 import { ToggleBookedDateDto, UpdateDressStatusDto } from './dto/dress-admin.dto';
+import { DeleteDressDto } from './dto/delete-dress.dto';
 
 @ApiTags('dresses')
 // Prefix matches the other controllers (`api/auth`, `api/booking-inquiries`)
@@ -96,6 +99,33 @@ export class DressesController {
     @Body() dto: UpdateDressStatusDto,
   ): Promise<ClientDress> {
     return this.service.updateStatus(id, dto);
+  }
+
+  /**
+   * How many booking inquiries point at this listing. Read by the owner's
+   * delete confirmation so it can say so before anything is destroyed.
+   * Returns only a count — no renter details — so it needs no gate beyond
+   * knowing the dress id.
+   */
+  @Get(':id/inquiry-count')
+  @ApiOperation({ summary: 'Number of booking inquiries referencing this dress' })
+  async getInquiryCount(@Param('id') id: string): Promise<{ count: number }> {
+    return { count: await this.service.countInquiries(id) };
+  }
+
+  /**
+   * Owner deletes their own listing. Not admin-gated — this is the
+   * user-facing action, separate from any moderation tooling. Ownership is
+   * checked in the service against the listing's email.
+   */
+  @Delete(':id')
+  @HttpCode(204)
+  @ApiOperation({ summary: "Owner: delete their own listing and its photos" })
+  async deleteDress(
+    @Param('id') id: string,
+    @Body() dto: DeleteDressDto,
+  ): Promise<void> {
+    await this.service.deleteDress(id, dto.email);
   }
 
   @Get(':id/similar')

@@ -1,10 +1,11 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { OtpService } from '../auth-otp/otp.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { VerifyRegistrationDto } from './dto/verify-registration.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
 
 @Controller('api/auth')
 export class UsersController {
@@ -51,5 +52,19 @@ export class UsersController {
   @Post('profile')
   updateProfile(@Body() body: { email: string; name?: string; city?: string }) {
     return this.service.updateProfile(body.email, body);
+  }
+
+  /**
+   * Self-service account deletion, reached from the user's own account
+   * settings — not the admin panel. Same correlated verify-then-act pattern
+   * as verify-registration / reset-password: the code sent via the existing
+   * POST /api/auth/send-otp is checked here and the account (plus its
+   * listings and their images) is removed in the same request.
+   */
+  @Post('delete-account')
+  @HttpCode(204)
+  async deleteAccount(@Body() body: DeleteAccountDto): Promise<void> {
+    this.otp.verifyOtp(body.email, body.code);
+    await this.service.deleteAccount(body.email);
   }
 }

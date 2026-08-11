@@ -73,6 +73,51 @@ export async function api(path, { method = "GET", body, adminPw } = {}) {
 }
 
 /**
+ * How many booking inquiries reference this dress. Read before showing the
+ * owner's delete confirmation, so the dialog can warn that deleting the
+ * listing leaves those requests behind.
+ */
+export function getDressInquiryCount(dressId) {
+  return api(`/api/dresses/${encodeURIComponent(dressId)}/inquiry-count`);
+}
+
+/**
+ * Owner deletes their own listing, its photos, and its stored image files.
+ *
+ * `email` is the ownership proof — this app has no bearer token, so the
+ * backend matches it against the listing's own email (see
+ * DressesService.deleteDress). Resolves with nothing on success; throws
+ * ApiError(403) if the email doesn't match the listing.
+ */
+export function deleteDress(dressId, email) {
+  return api(`/api/dresses/${encodeURIComponent(dressId)}`, {
+    method: "DELETE",
+    body: { email },
+  });
+}
+
+/** Admin: append an already-uploaded photo URL to a dress's gallery. */
+export function adminAddDressImage(dressId, url, adminPw) {
+  return api(`/api/admin/dresses/${encodeURIComponent(dressId)}/images`, {
+    method: "POST",
+    adminPw,
+    body: { url },
+  });
+}
+
+/**
+ * Admin: remove one photo from a dress's gallery and from storage.
+ * Rejects with ApiError(400) when it's the listing's last photo.
+ * Both admin image calls resolve with the updated dress.
+ */
+export function adminRemoveDressImage(dressId, imageId, adminPw) {
+  return api(
+    `/api/admin/dresses/${encodeURIComponent(dressId)}/images/${encodeURIComponent(imageId)}`,
+    { method: "DELETE", adminPw },
+  );
+}
+
+/**
  * Admin-only: turn selected listing photos into AI on-model photos.
  *
  * Resolves with one entry per requested image —
@@ -90,6 +135,27 @@ export function aiGenerateDressPhotos(dressId, imageIds, adminPw) {
     adminPw,
     body: { imageIds },
   });
+}
+
+/**
+ * Sends a 6-digit email OTP. Shared by registration, forgot-password, and
+ * account deletion — one code system, keyed only by email, no "purpose"
+ * field — so this is the same call AuthContext's own postJson makes for
+ * those flows, just going through the shared `api()` helper instead.
+ */
+export function sendOtp(email) {
+  return api("/api/auth/send-otp", { method: "POST", body: { email } });
+}
+
+/**
+ * Self-service account deletion: verifies the OTP and removes the account,
+ * its listings, and their images in one call (see UsersController /
+ * UsersService.deleteAccount on the backend). Booking inquiries the user
+ * sent are deliberately left behind as anonymized snapshots — see the
+ * backend for why.
+ */
+export function deleteAccount(email, code) {
+  return api("/api/auth/delete-account", { method: "POST", body: { email, code } });
 }
 
 /**
