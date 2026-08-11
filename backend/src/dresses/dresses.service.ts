@@ -1,83 +1,604 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Dress, DressStatus } from './dress.entity';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateDressDto } from './dto/create-dress.dto';
+import { UpdateDressDto } from './dto/update-dress.dto';
+import { UpdateDressStatusDto } from './dto/dress-admin.dto';
+import { AiPhotoError, AiPhotoService } from './ai-photo.service';
+import { StorageService } from './storage.service';
+
+/**
+ * The dress object the frontend consumes. Field-for-field what the old
+ * localStorage mock returned (frontend/src/lib/api.js), so App.jsx,
+ * AccountPage and AdminPage needed no reshaping when the mock was removed:
+ *   - `images` is a flat array of public URLs, not DressImage rows
+ *   - `booked` is a flat array of "YYYY-MM-DD" strings, not availability rows
+ *   - `createdAt` is epoch millis, because App.jsx sorts on it numerically
+ *
+ * `photos` is the one addition to that shape. It carries the same images in
+ * the same order, but with their row ids and `isAiGenerated` flags — the admin
+ * AI photo grid needs to address individual images by id, which flat URLs
+ * can't express. `images` is deliberately kept alongside it rather than
+ * replaced: every browse/detail consumer (App.jsx, the cards, ProductPage)
+ * reads `images[0]` and iterates `images`, and none of them care about ids.
+ */
+
+/** One listing photo, with the identity the admin grid needs. */
+export interface ClientDressPhoto {
+  id: string;
+  url: string;
+  isAiGenerated: boolean;
+}
+
+export interface ClientDress {
+  id: string;
+  title: string;
+  desc: string | null;
+  price: number;
+  fabric: string | null;
+  color: string | null;
+  colorHex: string | null;
+  designer: string | null;
+  source: string;
+  store: string | null;
+  condition: string;
+  dressLength: string;
+  sleeveLength: string;
+  city: string | null;
+  region: string | null;
+  size: string | null;
+  phone: string | null;
+  email: string | null;
+  status: string;
+  rejectReason: string | null;
+  createdAt: number;
+  images: string[];
+  photos: ClientDressPhoto[];
+  booked: string[];
+}
+
+/** One entry in the AI generation response — one per requested source image. */
+export interface AiGenerationResult {
+  sourceImageId: string;
+  generatedImageUrl: string | null;
+  status: 'success' | 'error';
+  error?: string;
+}
+
+/** Everything the client shape needs, in one query. */
+const CLIENT_INCLUDE = {
+  images: { orderBy: { order: 'asc' } },
+  availability: { orderBy: { date: 'asc' } },
+} satisfies Prisma.DressInclude;
+
+type DressWithRelations = Prisma.DressGetPayload<{ include: typeof CLIENT_INCLUDE }>;
+
+/**
+ * Ceiling on photos per listing, enforced when the admin adds one.
+ *
+ * Matches the `max` passed to ImageUploader on the admin screen. The publish
+ * form's own limit is lower (3) and independent — that one is about not
+ * overwhelming a first-time lister, this one is about what a gallery can
+ * usefully show. AI generations append into the same set and count against it.
+ */
+export const MAX_GALLERY_IMAGES = 8;
+
+/** `Date` -> "YYYY-MM-DD", in UTC so a day never shifts across timezones. */
+function toDateKey(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * "YYYY-MM-DD" -> midnight UTC. Parsing as UTC (rather than `new Date(key)`
+ * in server-local time) keeps the round-trip through toDateKey stable
+ * regardless of where the API happens to be running.
+ */
+function fromDateKey(key: string): Date {
+  return new Date(`${key}T00:00:00.000Z`);
+}
 
 @Injectable()
 export class DressesService {
+  private readonly logger = new Logger(DressesService.name);
+
   constructor(
-    @InjectRepository(Dress) private readonly repo: Repository<Dress>,
+    private readonly prisma: PrismaService,
+    private readonly aiPhoto: AiPhotoService,
+    private readonly storage: StorageService,
   ) {}
 
-  /** Public list: approved only. Admin list: pass status or 'all'. */
-  async findAll(status?: string): Promise<Dress[]> {
-    const where = status && status !== 'all' ? { status: status as DressStatus } : {};
-    return this.repo.find({ where, order: { createdAt: 'DESC' } });
+  private toClient(d: DressWithRelations): ClientDress {
+    return {
+      id: d.id,
+      title: d.title,
+      desc: d.desc,
+      price: d.price,
+      fabric: d.fabric,
+      color: d.color,
+      colorHex: d.colorHex,
+      designer: d.designer,
+      source: d.source,
+      store: d.store,
+      condition: d.condition,
+      dressLength: d.dressLength,
+      sleeveLength: d.sleeveLength,
+      city: d.city,
+      region: d.region,
+      size: d.size,
+      phone: d.phone,
+      email: d.email,
+      status: d.status,
+      rejectReason: d.rejectReason,
+      createdAt: d.createdAt.getTime(),
+      images: d.images.map((img) => img.url),
+      photos: d.images.map((img) => ({
+        id: img.id,
+        url: img.url,
+        isAiGenerated: img.isAiGenerated,
+      })),
+      booked: d.availability
+        .filter((a) => a.status === 'unavailable')
+        .map((a) => toDateKey(a.date)),
+    };
   }
 
-  async findOne(id: string): Promise<Dress> {
-    const d = await this.repo.findOne({ where: { id } });
-    if (!d) throw new NotFoundException('Dress not found');
-    return d;
-  }
-
-  /** A newly published dress always starts as pending. */
-  async create(data: Partial<Dress>): Promise<Dress> {
-    const dress = this.repo.create({
-      ...data,
-      status: 'pending',
-      rejectReason: '',
-      booked: data.booked ?? [],
-      images: data.images ?? [],
-    });
-    return this.repo.save(dress);
-  }
-
-  async update(id: string, data: Partial<Dress>): Promise<Dress> {
-    const dress = await this.findOne(id);
-    // Whitelist editable fields
-    const fields: (keyof Dress)[] = [
-      'title', 'desc', 'color', 'colorHex', 'condition', 'length',
-      'price', 'region', 'size', 'source', 'store', 'images',
-    ];
-    for (const f of fields) {
-      if (data[f] !== undefined) (dress as any)[f] = data[f];
+  /**
+   * Browse list. `status` is "approved" (default), a specific status, or
+   * "all" for the admin queue and the owner's own listings — which include
+   * pending and rejected ones.
+   */
+  async listDresses(status = 'approved'): Promise<ClientDress[]> {
+    try {
+      const dresses = await this.prisma.dress.findMany({
+        where: status === 'all' ? {} : { status },
+        orderBy: { createdAt: 'desc' },
+        include: CLIENT_INCLUDE,
+      });
+      return dresses.map((d) => this.toClient(d));
+    } catch {
+      throw new InternalServerErrorException('Failed to load dresses');
     }
-    return this.repo.save(dress);
   }
 
-  async setStatus(id: string, status: DressStatus, rejectReason = ''): Promise<Dress> {
-    const dress = await this.findOne(id);
-    dress.status = status;
-    dress.rejectReason = status === 'rejected' ? rejectReason : '';
-    return this.repo.save(dress);
+  async getDressById(id: string): Promise<ClientDress> {
+    const dress = await this.prisma.dress.findUnique({
+      where: { id },
+      include: CLIENT_INCLUDE,
+    });
+    if (!dress) throw new NotFoundException('השמלה לא נמצאה');
+    return this.toClient(dress);
   }
 
-  /** Toggle a single date key in the booked array. */
-  async toggleBooked(id: string, key: string): Promise<Dress> {
-    const dress = await this.findOne(id);
-    const set = new Set(dress.booked || []);
-    set.has(key) ? set.delete(key) : set.add(key);
-    dress.booked = [...set];
-    return this.repo.save(dress);
+  /**
+   * Create a listing. The owner is resolved from `email` rather than trusted
+   * from the body, so a client can't attach a listing to another account.
+   * Status always starts "pending" (schema default) — the approval flow is
+   * unchanged.
+   */
+  async createDress(dto: CreateDressDto): Promise<ClientDress> {
+    const email = dto.email.trim().toLowerCase();
+    const owner = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+    if (!owner) {
+      throw new BadRequestException(
+        'לא נמצא משתמש עם כתובת המייל הזו — יש להתחבר לפני פרסום שמלה',
+      );
+    }
+
+    const { images, email: _ignored, ...fields } = dto;
+
+    const created = await this.prisma.dress.create({
+      data: {
+        ...fields,
+        email,
+        ownerId: owner.id,
+        images: images?.length
+          ? { create: images.map((url, order) => ({ url, order })) }
+          : undefined,
+      },
+      include: CLIENT_INCLUDE,
+    });
+    return this.toClient(created);
   }
 
-  async setBooked(id: string, booked: string[]): Promise<Dress> {
-    const dress = await this.findOne(id);
-    dress.booked = booked || [];
-    return this.repo.save(dress);
+  /**
+   * Owner edit. When `images` is supplied it replaces the whole set (the UI
+   * edits the list as a unit, including reordering), so the old rows are
+   * deleted and rewritten inside one transaction — a partial failure would
+   * otherwise leave a listing with no photos.
+   *
+   * The delete-and-rewrite means row ids are not stable across an edit. That's
+   * fine for the URLs themselves, but it would silently drop the
+   * `isAiGenerated` flag on any generated photo the admin merely reordered, so
+   * the flag is carried across by URL — the one piece of per-row state the
+   * incoming flat `string[]` can't express.
+   */
+  async updateDress(id: string, dto: UpdateDressDto): Promise<ClientDress> {
+    await this.assertDressExists(id);
+    const { images, ...fields } = dto;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (images) {
+        const previous = await tx.dressImage.findMany({
+          where: { dressId: id },
+          select: { url: true, isAiGenerated: true },
+        });
+        const aiUrls = new Set(
+          previous.filter((p) => p.isAiGenerated).map((p) => p.url),
+        );
+
+        await tx.dressImage.deleteMany({ where: { dressId: id } });
+        await tx.dressImage.createMany({
+          data: images.map((url, order) => ({
+            dressId: id,
+            url,
+            order,
+            isAiGenerated: aiUrls.has(url),
+          })),
+        });
+      }
+      return tx.dress.update({
+        where: { id },
+        data: fields,
+        include: CLIENT_INCLUDE,
+      });
+    });
+    return this.toClient(updated);
   }
 
-  async remove(id: string): Promise<void> {
-    const dress = await this.findOne(id);
-    await this.repo.remove(dress);
+  /** Admin approve/reject. Clears the reason whenever status isn't "rejected". */
+  async updateStatus(id: string, dto: UpdateDressStatusDto): Promise<ClientDress> {
+    await this.assertDressExists(id);
+    const updated = await this.prisma.dress.update({
+      where: { id },
+      data: {
+        status: dto.status,
+        rejectReason: dto.status === 'rejected' ? dto.rejectReason ?? '' : null,
+      },
+      include: CLIENT_INCLUDE,
+    });
+    return this.toClient(updated);
   }
 
-  count(): Promise<number> {
-    return this.repo.count();
+  /**
+   * Toggle one day on the owner's availability calendar. A row's presence
+   * means "blocked", so toggling off deletes it rather than flipping a flag —
+   * matching the model's "absence means available" convention.
+   */
+  async toggleBookedDate(id: string, key: string): Promise<ClientDress> {
+    await this.assertDressExists(id);
+    const date = fromDateKey(key);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('תאריך לא תקין');
+    }
+
+    const existing = await this.prisma.dressAvailability.findUnique({
+      where: { dressId_date: { dressId: id, date } },
+      select: { id: true },
+    });
+
+    if (existing) {
+      await this.prisma.dressAvailability.delete({ where: { id: existing.id } });
+    } else {
+      await this.prisma.dressAvailability.create({
+        data: { dressId: id, date, status: 'unavailable' },
+      });
+    }
+    return this.getDressById(id);
   }
 
-  saveMany(rows: Partial<Dress>[]): Promise<Dress[]> {
-    return this.repo.save(this.repo.create(rows));
+  /**
+   * Admin-only: turn selected listing photos into AI on-model photos and save
+   * the results as photos on this listing.
+   *
+   * Placement of the results is deliberately conditional on how many photos
+   * the admin picked, which is the whole point of the feature:
+   *
+   *   - exactly one selected → the generated photo becomes the cover, because
+   *     picking a single photo is the admin saying "this listing's thumbnail
+   *     is bad, fix it". Cover means order 0 (see the note on DressImage in
+   *     schema.prisma); the existing photos shift down and none are removed,
+   *     so the original is still there if the generation looks wrong.
+   *   - more than one → results are appended and the cover is left alone,
+   *     because a multi-select is the admin filling out the gallery, and
+   *     silently promoting an arbitrary one of several results would be a
+   *     coin flip.
+   *
+   * Note the branch tests the number *selected*, not the number that
+   * succeeded: if the admin picks one photo and it fails, nothing is written
+   * and the cover stays put.
+   *
+   * Generation runs concurrently, one prediction per image (the provider takes
+   * a single product image; batching is not on the table), and every call is
+   * settled independently — one failure returns an error for that photo and
+   * leaves the rest to save normally. A partial batch is a real outcome here,
+   * not an error state, so the endpoint still returns 200 with per-image
+   * statuses.
+   *
+   * The whole selection is fired at once, so the batch size is capped at the
+   * provider's concurrency ceiling — see AiGenerateDto.
+   */
+  async generateAiPhotos(
+    dressId: string,
+    imageIds: string[],
+  ): Promise<AiGenerationResult[]> {
+    const dress = await this.prisma.dress.findUnique({
+      where: { id: dressId },
+      include: { images: true },
+    });
+    if (!dress) throw new NotFoundException('השמלה לא נמצאה');
+
+    // Resolve ids against *this* dress's photos, so a valid id belonging to
+    // another listing can't be used to generate against it.
+    const byId = new Map(dress.images.map((img) => [img.id, img]));
+    const sources = imageIds.map((id) => {
+      const img = byId.get(id);
+      if (!img) {
+        throw new BadRequestException('אחת התמונות שנבחרו לא שייכת לשמלה הזו');
+      }
+      return img;
+    });
+
+    const results: AiGenerationResult[] = await Promise.all(
+      sources.map(async (src): Promise<AiGenerationResult> => {
+        try {
+          const generatedUrl = await this.aiPhoto.generateModelPhoto(src.url);
+          // The provider's CDN URL expires — persist our own copy before it is
+          // ever written to the database.
+          const storedUrl = await this.storage.uploadFromUrl(generatedUrl, dressId);
+          return {
+            sourceImageId: src.id,
+            generatedImageUrl: storedUrl,
+            status: 'success',
+          };
+        } catch (err) {
+          const message =
+            err instanceof AiPhotoError
+              ? err.message
+              : (err as { message?: string })?.message || 'יצירת התמונה נכשלה';
+          this.logger.warn(
+            `AI photo generation failed for image ${src.id} on dress ${dressId}: ${message}`,
+          );
+          return {
+            sourceImageId: src.id,
+            generatedImageUrl: null,
+            status: 'error',
+            error: message,
+          };
+        }
+      }),
+    );
+
+    const generatedUrls = results
+      .filter((r) => r.status === 'success' && r.generatedImageUrl)
+      .map((r) => r.generatedImageUrl as string);
+
+    if (generatedUrls.length > 0) {
+      const asCover = imageIds.length === 1;
+      await this.prisma.$transaction(async (tx) => {
+        if (asCover) {
+          // `order` carries no unique constraint, so a bulk increment is safe
+          // and keeps the existing photos' relative order intact.
+          await tx.dressImage.updateMany({
+            where: { dressId },
+            data: { order: { increment: 1 } },
+          });
+          await tx.dressImage.create({
+            data: {
+              dressId,
+              url: generatedUrls[0],
+              order: 0,
+              isAiGenerated: true,
+            },
+          });
+          return;
+        }
+
+        const last = await tx.dressImage.findFirst({
+          where: { dressId },
+          orderBy: { order: 'desc' },
+          select: { order: true },
+        });
+        const start = (last?.order ?? -1) + 1;
+        await tx.dressImage.createMany({
+          data: generatedUrls.map((url, i) => ({
+            dressId,
+            url,
+            order: start + i,
+            isAiGenerated: true,
+          })),
+        });
+      });
+    }
+
+    return results;
+  }
+
+  /**
+   * How many booking inquiries reference this dress.
+   *
+   * Feeds the warning in the owner's delete confirmation. `BookingInquiry`
+   * has no foreign key to `Dress` (its dressId is a plain column — see the
+   * model's own note), so this is a count, not a relation traversal, and
+   * these rows are NOT removed when the dress is.
+   */
+  async countInquiries(dressId: string): Promise<number> {
+    return this.prisma.bookingInquiry.count({ where: { dressId } });
+  }
+
+  /**
+   * Owner-initiated deletion of their own listing.
+   *
+   * OWNERSHIP: verified by matching `requesterEmail` against the listing's
+   * own `email`, the same weak-but-consistent rule `createDress` uses to
+   * resolve an owner and `AccountPage` uses to decide which listings are
+   * "mine". This app has no bearer token — the login endpoints return a user
+   * object and nothing signs subsequent requests — so an email match is the
+   * strongest check available here without introducing real sessions. It
+   * stops the accidental and the casual, not someone who knows another
+   * lister's address. Tighten this when real auth lands.
+   *
+   * BOOKING INQUIRIES ARE DELIBERATELY LEFT BEHIND. Each inquiry row is a
+   * self-contained snapshot (dress title, both phone numbers, requested
+   * dates) captured at click time precisely so it outlives the listing, and
+   * the admin queue already renders "השמלה כבר לא זמינה" for a missing
+   * dress. Cascading them would destroy a renter's pending request and the
+   * admin's ability to follow it up. The owner is told the count before
+   * confirming, so this is disclosed rather than silent.
+   *
+   * Everything else hangs off `Dress` with onDelete: Cascade (images, sizes,
+   * availability, bookings, reviews, favourites) and goes with the row.
+   */
+  async deleteDress(id: string, requesterEmail: string): Promise<void> {
+    const dress = await this.prisma.dress.findUnique({
+      where: { id },
+      select: { id: true, email: true, images: { select: { url: true } } },
+    });
+    if (!dress) throw new NotFoundException('השמלה לא נמצאה');
+
+    const owner = (dress.email || '').trim().toLowerCase();
+    const requester = (requesterEmail || '').trim().toLowerCase();
+    if (!owner || owner !== requester) {
+      throw new ForbiddenException('אפשר למחוק רק מודעות שפרסמת');
+    }
+
+    // Storage first: if the row went first and this failed, the URLs needed
+    // to find these objects would already be gone and the files unreachable
+    // forever. deleteByPublicUrl never throws, so a Storage problem can't
+    // block the deletion itself.
+    await Promise.all(dress.images.map((img) => this.storage.deleteByPublicUrl(img.url)));
+
+    await this.prisma.dress.delete({ where: { id } });
+  }
+
+  /**
+   * Bulk owner deletion — every listing this owner has, hard-deleted with
+   * their stored images. Only caller is UsersService.deleteAccount: unlike
+   * `deleteDress`, there is no per-request email to check against, because
+   * by the time this runs the account itself (and thus its ownership) has
+   * already been resolved and is about to be removed. Same storage-then-row
+   * order as `deleteDress`, and for the same reason: if the row went first
+   * and this failed, the URLs needed to find those files would already be
+   * gone.
+   */
+  async deleteAllByOwner(ownerId: string): Promise<void> {
+    const dresses = await this.prisma.dress.findMany({
+      where: { ownerId },
+      select: { images: { select: { url: true } } },
+    });
+    await Promise.all(
+      dresses.flatMap((d) =>
+        d.images.map((img) => this.storage.deleteByPublicUrl(img.url)),
+      ),
+    );
+    await this.prisma.dress.deleteMany({ where: { ownerId } });
+  }
+
+  /**
+   * Admin: drop one photo from a listing's gallery.
+   *
+   * Refuses the last one — every consumer renders `images[0]` as the card
+   * thumbnail and the detail page's lead image, so a listing with an empty
+   * gallery renders as a broken image everywhere it appears.
+   *
+   * Re-packs `order` afterwards so the sequence stays 0..n-1 with no holes.
+   * Nothing reads `order` numerically beyond sorting, but leaving gaps makes
+   * the "lowest order is the cover" rule harder to reason about, and removing
+   * the current cover has to promote the next photo cleanly.
+   */
+  async removeImage(dressId: string, imageId: string): Promise<ClientDress> {
+    const images = await this.prisma.dressImage.findMany({
+      where: { dressId },
+      orderBy: { order: 'asc' },
+      select: { id: true, url: true },
+    });
+    if (images.length === 0) throw new NotFoundException('השמלה לא נמצאה');
+
+    const target = images.find((img) => img.id === imageId);
+    if (!target) throw new NotFoundException('התמונה לא נמצאה');
+
+    if (images.length === 1) {
+      throw new BadRequestException(
+        'לא ניתן למחוק את התמונה האחרונה — לכל שמלה חייבת להיות לפחות תמונה אחת',
+      );
+    }
+
+    await this.storage.deleteByPublicUrl(target.url);
+
+    const remaining = images.filter((img) => img.id !== imageId);
+    await this.prisma.$transaction([
+      this.prisma.dressImage.delete({ where: { id: imageId } }),
+      ...remaining.map((img, order) =>
+        this.prisma.dressImage.update({ where: { id: img.id }, data: { order } }),
+      ),
+    ]);
+
+    return this.getDressById(dressId);
+  }
+
+  /**
+   * Admin: append an already-uploaded photo to a listing's gallery.
+   *
+   * Takes a URL rather than the file itself because the upload already has a
+   * home — the frontend posts the bytes to `POST /api/dresses/images` (same
+   * path the publish form uses) and passes the resulting public URL here.
+   * That keeps one upload implementation instead of a second admin-only one.
+   *
+   * The cap is re-checked here and not only in the UI: the UI disables the
+   * button, but the endpoint is what actually has to hold the line.
+   */
+  async addImage(dressId: string, url: string): Promise<ClientDress> {
+    await this.assertDressExists(dressId);
+
+    const last = await this.prisma.dressImage.findFirst({
+      where: { dressId },
+      orderBy: { order: 'desc' },
+      select: { order: true },
+    });
+    const count = await this.prisma.dressImage.count({ where: { dressId } });
+    if (count >= MAX_GALLERY_IMAGES) {
+      throw new BadRequestException(
+        `הגלריה מלאה — עד ${MAX_GALLERY_IMAGES} תמונות לשמלה`,
+      );
+    }
+
+    await this.prisma.dressImage.create({
+      data: { dressId, url, order: (last?.order ?? -1) + 1 },
+    });
+    return this.getDressById(dressId);
+  }
+
+  /** Dresses sharing this one's colour or source, excluding itself. */
+  async getSimilarDresses(id: string, limit = 4): Promise<ClientDress[]> {
+    const current = await this.prisma.dress.findUnique({
+      where: { id },
+      select: { color: true, source: true },
+    });
+    if (!current) throw new NotFoundException('השמלה לא נמצאה');
+
+    const or: Prisma.DressWhereInput[] = [{ source: current.source }];
+    if (current.color !== null) or.push({ color: current.color });
+
+    const similar = await this.prisma.dress.findMany({
+      where: { id: { not: id }, status: 'approved', OR: or },
+      take: limit,
+      orderBy: { createdAt: 'desc' },
+      include: CLIENT_INCLUDE,
+    });
+    return similar.map((d) => this.toClient(d));
+  }
+
+  private async assertDressExists(id: string): Promise<void> {
+    const count = await this.prisma.dress.count({ where: { id } });
+    if (count === 0) throw new NotFoundException('השמלה לא נמצאה');
   }
 }

@@ -1,13 +1,20 @@
-import { CONDITIONS } from "../../lib/data.js";
 import { hexToRgba } from "../../lib/color.js";
 import { FONTS } from "../../constants/theme.js";
 import { Icon } from "../ui/Icon.jsx";
 import { FilterSection } from "./FilterSection.jsx";
 import { Chip } from "./Chip.jsx";
 import { PriceRange } from "./PriceRange.jsx";
-import { COLOR_SWATCHES, LETTER_SIZES, SOURCE_OPTIONS, PRICE } from "./filterConstants.js";
+import {
+  COLOR_SWATCHES,
+  LETTER_SIZES,
+  SOURCE_OPTIONS,
+  PRICE,
+  DRESS_LENGTH_OPTIONS,
+  SLEEVE_LENGTH_OPTIONS,
+} from "./filterConstants.js";
 
-/* The grouped filter controls: size, price, color, source, condition. */
+/* The grouped filter controls: size, price, color (multi-select), source,
+   dress length, sleeve length. */
 export function FilterContent({ f, setF }) {
   const toggleArr = (key, val) =>
     setF((p) => ({
@@ -41,17 +48,17 @@ export function FilterContent({ f, setF }) {
         />
       </FilterSection>
 
-      {/* 3 · COLOR — frosted-glass pills, each tinted in its own color */}
+      {/* 3 · COLOR — multi-select frosted-glass pills, each tinted in its own color */}
       <FilterSection title="צבע" icon={<Icon.palette width="15" height="15" />}>
         <div className="flex flex-wrap gap-2">
           {COLOR_SWATCHES.map((c) => {
-            const active = f.color === c.name;
+            const active = f.colors.includes(c.name);
             return (
               <button
                 key={c.name}
                 type="button"
                 aria-pressed={active}
-                onClick={() => setF((p) => ({ ...p, color: active ? "" : c.name }))}
+                onClick={() => toggleArr("colors", c.name)}
                 style={{
                   fontFamily: FONTS.jost,
                   fontSize: "12.5px",
@@ -94,12 +101,23 @@ export function FilterContent({ f, setF }) {
         </div>
       </FilterSection>
 
-      {/* 5 · CONDITION — least important */}
-      <FilterSection title="מצב השמלה" icon={<Icon.sparkle width="15" height="15" />}>
+      {/* 5 · DRESS LENGTH — multi-select */}
+      <FilterSection title="אורך שמלה" icon={<Icon.ruler width="15" height="15" />}>
         <div className="flex flex-wrap gap-2">
-          {CONDITIONS.map((c) => (
-            <Chip key={c} active={f.conditions.includes(c)} onClick={() => toggleArr("conditions", c)}>
-              {c}
+          {DRESS_LENGTH_OPTIONS.map((l) => (
+            <Chip key={l} active={f.dressLengths.includes(l)} onClick={() => toggleArr("dressLengths", l)}>
+              {l}
+            </Chip>
+          ))}
+        </div>
+      </FilterSection>
+
+      {/* 6 · SLEEVE LENGTH — multi-select */}
+      <FilterSection title="אורך שרוול" icon={<Icon.sparkle width="15" height="15" />}>
+        <div className="flex flex-wrap gap-2">
+          {SLEEVE_LENGTH_OPTIONS.map((l) => (
+            <Chip key={l} active={f.sleeveLengths.includes(l)} onClick={() => toggleArr("sleeveLengths", l)}>
+              {l}
             </Chip>
           ))}
         </div>

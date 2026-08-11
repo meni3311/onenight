@@ -1,50 +1,89 @@
-import { useState, useRef } from "react";
-import { REGIONS, SIZES, LENGTHS, CONDITIONS } from "../lib/data.js";
+import { useState, useEffect } from "react";
+import { REGIONS, SIZES, CONDITIONS, DRESS_LENGTHS, SLEEVE_LENGTHS } from "../lib/data.js";
 import { DEFAULT_DRESS_COLOR_HEX } from "../constants/theme.js";
+import { useAuth } from "../context/AuthContext.jsx";
+import { ImageUploader } from "../components/ui/ImageUploader.jsx";
 
 const EMPTY_FORM = {
-  title: "", desc: "", color: "", condition: "", length: "", price: "",
-  region: "", size: "", source: "", store: "", phone: "", email: "",
+  title: "", desc: "", color: "", condition: "", price: "",
+  region: "", city: "", size: "", source: "", store: "", phone: "", email: "",
+  dressLength: "", sleeveLength: "",
 };
 const MAX_IMAGES = 3;
 
+/* Strip everything but digits so "050-1234567" and "050 1234567" validate
+   the same as "0501234567". */
+const normalizePhone = (s) => (s || "").replace(/\D/g, "");
+
 /* Publish-a-dress form with client-side validation and image previews. */
 export default function PublishPage({ onSubmit, goHome }) {
-  const [v, setV] = useState(EMPTY_FORM);
+  const { isLoggedIn, account } = useAuth();
+  const [v, setV] = useState(() => ({ ...EMPTY_FORM, email: account?.email || "" }));
   const [images, setImages] = useState([]);
   const [errors, setErrors] = useState({});
-  const [drag, setDrag] = useState(false);
-  const fileRef = useRef();
+  /* Required acknowledgment of the two notice boxes below, replacing the
+     old pre-submit confirm popup — same required-checkbox pattern already
+     used for Terms of Use acceptance in AuthContext.jsx's registration
+     flow, rather than a plain "read-only, no action needed" notice. */
+  const [agreeLiability, setAgreeLiability] = useState(false);
+  const [agreeFee, setAgreeFee] = useState(false);
+  /* In flight between clicking "פרסום השמלה" and the POST resolving. */
+  const [submitting, setSubmitting] = useState(false);
   const set = (k, val) => setV((p) => ({ ...p, [k]: val }));
 
-  const handleFiles = (list) => {
-    const arr = Array.from(list).slice(0, MAX_IMAGES - images.length);
-    arr.forEach((file) => {
-      const r = new FileReader();
-      r.onload = (e) => setImages((p) => (p.length < MAX_IMAGES ? [...p, e.target.result] : p));
-      r.readAsDataURL(file);
-    });
-  };
+  /* Ownership is keyed by the account's email (see AccountPage's "my
+     listings" filter) — while signed in, lock the field to that address
+     instead of a free-typed one so the listing reliably shows up under
+     "השמלות שהעליתי" afterwards. Re-syncs if the user logs in mid-visit
+     (the auth modal is reachable from the navbar on every page). */
+  useEffect(() => {
+    if (isLoggedIn && account?.email) set("email", account.email);
+  }, [isLoggedIn, account?.email]);
+
   const validate = () => {
     const e = {};
     if (!v.title.trim()) e.title = "נא להזין כותרת";
     if (!v.desc.trim()) e.desc = "נא להזין תיאור";
     if (!v.condition) e.condition = "נא לבחור מצב";
-    if (!v.length) e.length = "נא לבחור אורך";
+    if (!v.dressLength) e.dressLength = "נא לבחור אורך שמלה";
+    if (!v.sleeveLength) e.sleeveLength = "נא לבחור אורך שרוול";
     if (!v.price || +v.price <= 0) e.price = "נא להזין מחיר";
     if (!v.region) e.region = "נא לבחור אזור";
     if (!v.size) e.size = "נא לבחור מידה";
     if (!v.source) e.source = "נא לבחור מקור";
     if (v.source === "שם חנות" && !v.store.trim()) e.store = "נא להזין שם חנות";
-    if (!/^0\d{8,9}$/.test(v.phone.trim())) e.phone = "מספר טלפון לא תקין";
+    if (!/^0\d{8,9}$/.test(normalizePhone(v.phone))) e.phone = "מספר טלפון לא תקין (לדוגמה 050-1234567)";
     if (!/^\S+@\S+\.\S+$/.test(v.email.trim())) e.email = "כתובת מייל לא תקינה";
     if (images.length === 0) e.images = "נא להעלות לפחות תמונה אחת";
+    if (!agreeLiability) e.liability = "יש לאשר את סעיף האחריות כדי להמשיך";
+    if (!agreeFee) e.fee = "יש לאשר את סעיף העמלה כדי להמשיך";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
-  const submit = () => {
+  /* No more confirm-popup gate — the two notice boxes below (liability +
+     fee) are read directly on the page and required via their own
+     checkboxes, so a valid submit here goes straight through.
+
+     Awaited so the button can hold a spinner for the round trip. The guard
+     on `submitting` is the real double-submit protection, not the button's
+     `disabled` attribute: Enter-to-submit and a fast double-click can both
+     re-enter this before React has repainted the disabled state, and a
+     duplicate POST here means a duplicate listing in the moderation queue.
+
+     onSubmit rethrows on failure (see App.jsx's publish) — it has already
+     shown the toast, so there's nothing to report here beyond releasing the
+     button. On success it navigates away and this component unmounts, which
+     is why `submitting` is never cleared on the happy path. */
+  const submit = async () => {
+    if (submitting) return;
     if (!validate()) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
-    onSubmit({ ...v, price: +v.price, images, colorHex: DEFAULT_DRESS_COLOR_HEX });
+    setSubmitting(true);
+    try {
+      /* Phone is contact info only — never used to match ownership. */
+      await onSubmit({ ...v, phone: normalizePhone(v.phone), price: +v.price, images, colorHex: DEFAULT_DRESS_COLOR_HEX });
+    } catch {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -69,10 +108,15 @@ export default function PublishPage({ onSubmit, goHome }) {
               <option value="">בחרי…</option>{CONDITIONS.map((c) => <option key={c}>{c}</option>)}
             </select>{errors.condition && <span className="err">{errors.condition}</span>}</div>
 
-          <div className="field"><label>אורך</label>
-            <select value={v.length} onChange={(e) => set("length", e.target.value)}>
-              <option value="">בחרי…</option>{LENGTHS.map((c) => <option key={c}>{c}</option>)}
-            </select>{errors.length && <span className="err">{errors.length}</span>}</div>
+          <div className="field"><label>אורך שמלה</label>
+            <select value={v.dressLength} onChange={(e) => set("dressLength", e.target.value)}>
+              <option value="">בחרי…</option>{DRESS_LENGTHS.map((c) => <option key={c}>{c}</option>)}
+            </select>{errors.dressLength && <span className="err">{errors.dressLength}</span>}</div>
+
+          <div className="field"><label>אורך שרוול</label>
+            <select value={v.sleeveLength} onChange={(e) => set("sleeveLength", e.target.value)}>
+              <option value="">בחרי…</option>{SLEEVE_LENGTHS.map((c) => <option key={c}>{c}</option>)}
+            </select>{errors.sleeveLength && <span className="err">{errors.sleeveLength}</span>}</div>
 
           <div className="field"><label>מחיר להשכרה ₪</label>
             <input type="number" placeholder="0" value={v.price} onChange={(e) => set("price", e.target.value)} />
@@ -82,6 +126,9 @@ export default function PublishPage({ onSubmit, goHome }) {
             <select value={v.region} onChange={(e) => set("region", e.target.value)}>
               <option value="">בחרי…</option>{REGIONS.map((c) => <option key={c}>{c}</option>)}
             </select>{errors.region && <span className="err">{errors.region}</span>}</div>
+
+          <div className="field"><label>עיר</label>
+            <input type="text" placeholder="לדוגמה: תל אביב" value={v.city} onChange={(e) => set("city", e.target.value)} /></div>
 
           <div className="field"><label>מידה</label>
             <select value={v.size} onChange={(e) => set("size", e.target.value)}>
@@ -102,28 +149,58 @@ export default function PublishPage({ onSubmit, goHome }) {
             {errors.phone && <span className="err">{errors.phone}</span>}</div>
 
           <div className="field"><label>מייל (לעדכונים)</label>
-            <input type="email" placeholder="your@email.com" value={v.email} onChange={(e) => set("email", e.target.value)} />
+            {isLoggedIn ? (
+              <>
+                <input type="email" value={v.email} disabled className="opacity-70" />
+                <p className="mt-1 text-[11px] text-[var(--muted)]">
+                  מחוברת כ-{v.email} — המודעה תופיע תחת "השמלות שלי" בתפריט המשתמש שלך
+                </p>
+              </>
+            ) : (
+              <input type="email" placeholder="your@email.com" value={v.email} onChange={(e) => set("email", e.target.value)} />
+            )}
             {errors.email && <span className="err">{errors.email}</span>}</div>
 
           <div className="field full"><label>תמונות (עד 3)</label>
-            <div className={"dropzone" + (drag ? " drag" : "")}
-              onClick={() => fileRef.current.click()}
-              onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-              onDragLeave={() => setDrag(false)}
-              onDrop={(e) => { e.preventDefault(); setDrag(false); handleFiles(e.dataTransfer.files); }}>
-              {images.length < MAX_IMAGES ? "גררי לכאן תמונות או לחצי לבחירה" : "הגעת למקסימום (3 תמונות)"}
-            </div>
-            <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleFiles(e.target.files)} />
-            {errors.images && <span className="err">{errors.images}</span>}
-            {images.length > 0 && <div className="thumbs">
-              {images.map((src, i) => (<div key={i} className="thumb">
-                <img src={src} alt="" /><button onClick={() => setImages((p) => p.filter((_, j) => j !== i))}>✕</button>
-              </div>))}
-            </div>}
+            <ImageUploader images={images} setImages={setImages} max={MAX_IMAGES} error={errors.images} />
           </div>
 
           <div className="full mt-2">
-            <button className="btn btn-rose btn-block" onClick={submit}>פרסום השמלה</button>
+            <div className="notice-box">
+              <p className="notice-box-title">אחריות</p>
+              <p className="notice-box-text">
+                האתר אינו אחראי על כל נזק, פגם או גניבה של השמלה. למשתמשות באתר אין כל טענה משפטית כלפי בעל האתר בעניינים אלה.
+              </p>
+              <label className="notice-box-check">
+                <input
+                  type="checkbox"
+                  checked={agreeLiability}
+                  onChange={(e) => { setAgreeLiability(e.target.checked); if (e.target.checked) setErrors((p) => ({ ...p, liability: undefined })); }}
+                />
+                קראתי ואני מאשרת
+              </label>
+              {errors.liability && <span className="err">{errors.liability}</span>}
+            </div>
+
+            <div className="notice-box">
+              <p className="notice-box-title">עמלת שימוש</p>
+              <p className="notice-box-text">
+                יש לשלם עמלה בשיעור 10% מכל עסקה שנסגרת דרך האתר. את התשלום יש להעביר באמצעות שירות הלקוחות.
+              </p>
+              <label className="notice-box-check">
+                <input
+                  type="checkbox"
+                  checked={agreeFee}
+                  onChange={(e) => { setAgreeFee(e.target.checked); if (e.target.checked) setErrors((p) => ({ ...p, fee: undefined })); }}
+                />
+                קראתי ואני מאשרת
+              </label>
+              {errors.fee && <span className="err">{errors.fee}</span>}
+            </div>
+
+            <button className="btn btn-rose btn-block" onClick={submit} disabled={submitting} aria-busy={submitting}>
+              {submitting ? <><span className="btn-spinner" aria-hidden="true" />מפרסמת…</> : "פרסום השמלה"}
+            </button>
             <div className="mt-[14px] text-center"><span className="link-rose" onClick={goHome}>חזרה לעמוד הבית</span></div>
           </div>
         </div>

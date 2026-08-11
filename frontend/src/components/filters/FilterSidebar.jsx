@@ -8,8 +8,11 @@ import { SearchButton } from "./SearchButton.jsx";
 import { activeFilterCount, EMPTY_FILTERS } from "./filterConstants.js";
 
 /* Floating filter trigger + centered frosted-glass filter modal.
-   The trigger only appears once the gallery (#browse) is in view. */
-export function FilterSidebar({ f, setF, resultCount }) {
+   The trigger only appears once the gallery (#browse) is in view.
+   `children` (e.g. the sort button) render alongside the trigger in the
+   same fixed/centered row, so any floating sibling controls fade in/out
+   together with it and sit visually paired next to it. */
+export function FilterSidebar({ f, setF, resultCount, children }) {
   const [open, setOpen] = useState(false);
   const [panelIn, setPanelIn] = useState(false);
   const showTrigger = useInView("browse", { rootMargin: "-20% 0px 0px 0px" });
@@ -27,31 +30,38 @@ export function FilterSidebar({ f, setF, resultCount }) {
 
   return (
     <>
-      {/* Floating trigger — burgundy frosted glass, centered at the bottom */}
-      <button
-        type="button"
-        onClick={openModal}
+      {/* Floating trigger row — burgundy frosted glass, centered at the bottom */}
+      <div
         style={{
-          background: "rgba(74,38,35,0.6)",
-          backdropFilter: "blur(16px) saturate(1.4)",
-          WebkitBackdropFilter: "blur(16px) saturate(1.4)",
-          border: "1px solid rgba(230,190,180,0.28)",
-          boxShadow: "0 10px 30px rgba(35,15,14,0.35), inset 0 1px 0 rgba(255,255,255,0.12)",
           opacity: showTrigger ? 1 : 0,
           pointerEvents: showTrigger ? "auto" : "none",
         }}
-        className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center justify-center gap-2 rounded-full px-6 py-3 text-sm font-semibold text-white transition-opacity duration-300 ease-out"
+        className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 transition-opacity duration-300 ease-out"
       >
-        <Icon.slider width="18" height="18" />
-        <span className="inline-flex items-baseline gap-1">
-          סינון
-          {count > 0 && (
-            <span className="text-xs font-bold" style={{ color: COLORS.glass.accent }}>
-              {count}
-            </span>
-          )}
-        </span>
-      </button>
+        <button
+          type="button"
+          onClick={openModal}
+          style={{
+            background: "rgba(74,38,35,0.6)",
+            backdropFilter: "blur(16px) saturate(1.4)",
+            WebkitBackdropFilter: "blur(16px) saturate(1.4)",
+            border: "1px solid rgba(230,190,180,0.28)",
+            boxShadow: "0 10px 30px rgba(35,15,14,0.35), inset 0 1px 0 rgba(255,255,255,0.12)",
+          }}
+          className="flex items-center justify-center gap-2 rounded-full px-6 py-3 text-sm font-semibold text-white"
+        >
+          <Icon.slider width="18" height="18" />
+          <span className="inline-flex items-baseline gap-1">
+            סינון
+            {count > 0 && (
+              <span className="text-xs font-bold" style={{ color: COLORS.glass.accent }}>
+                {count}
+              </span>
+            )}
+          </span>
+        </button>
+        {children}
+      </div>
 
       {/* Centered floating frosted-glass card */}
       {open && (

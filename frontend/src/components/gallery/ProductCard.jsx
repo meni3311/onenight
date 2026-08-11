@@ -54,7 +54,7 @@ export function ProductCard({ d, fav, onFav, onOpen }) {
           textTransform: "uppercase",
           color: "#999",
         }}>
-          מידה {d.size}
+          מידה {d.size}{d.city ? ` · ${d.city}` : ""}
         </p>
 
         {/* Price — letter-spaced, with a lighter per-rental label */}

@@ -33,7 +33,7 @@ For auto-reload while developing: `npm run start:dev`.
 
 ## Admin panel
 
-Open **http://localhost:3000/#admin**. Password: `onenight2026`
+Open **http://localhost:3000/#admin**.
 (change it via the `ADMIN_PASSWORD` environment variable, e.g. `ADMIN_PASSWORD=secret npm run start`).
 
 Here you approve or reject pending listings.

@@ -1,122 +1,185 @@
 /* ============================================================
-   Mock API — localStorage-backed, mimics the future REST backend.
-   Lets the frontend run standalone (npm run dev) with no server.
+   HTTP client for the NestJS backend.
 
-   To switch to a real backend later, replace `api()` below with a
-   fetch() implementation pointing at your server. The endpoint
-   shapes (paths, bodies, responses) match what the UI expects.
+   This file used to be a localStorage-backed mock. It isn't any more:
+   every dress read and write goes to real Postgres (via Prisma) and
+   every photo lives in Supabase Storage. Nothing in the dress flow
+   touches browser storage — that's what made listings invisible from
+   any other browser.
+
+   Do not reintroduce a local fallback here. A mock that silently takes
+   over when the API is down looks like it works and loses data.
    ============================================================ */
-import { SEED, LS, ADMIN_PASSWORD } from "./data.js";
 
-const DELAY = 250; // simulate network latency
-const wait = (v) => new Promise((res) => setTimeout(() => res(v), DELAY));
+/* Dev goes through Vite's proxy (see vite.config.js), which forwards
+   /api → http://localhost:3000. In production set VITE_API_BASE_URL to
+   the deployed API origin. */
+const BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
-const DRESSES_KEY = "onenight_dresses";
-const USERS_KEY = "onenight_users";
+/* Callers pass the full "/api/..." path, matching the backend controllers
+   (which carry the api/ prefix themselves — there's no global prefix). */
+const withBase = (path) => BASE + path;
 
-function loadDresses(){
-  let list = LS.get(DRESSES_KEY, null);
-  if(!list){ list = SEED; LS.set(DRESSES_KEY, list); }
-  return list;
-}
-function saveDresses(list){ LS.set(DRESSES_KEY, list); }
-function loadUsers(){ return LS.get(USERS_KEY, []); }
-function saveUsers(list){ LS.set(USERS_KEY, list); }
-
-function uid(prefix){ return prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
-
-class ApiError extends Error {}
-
-/* Router: (method, path, {body, adminPw}) -> data */
-function route(method, path, { body, adminPw } = {}){
-  const [bare, query] = path.split("?");
-  const parts = bare.split("/").filter(Boolean); // e.g. ["api","dresses","seed-1","status"]
-
-  // ---- dresses collection ----
-  if(parts[0] === "api" && parts[1] === "dresses" && parts.length === 2){
-    if(method === "GET"){
-      const params = new URLSearchParams(query || "");
-      const status = params.get("status") || "approved";
-      const all = loadDresses();
-      return status === "all" ? all : all.filter(d => d.status === status);
-    }
-    if(method === "POST"){
-      const list = loadDresses();
-      const created = {
-        id: uid("dress"),
-        status: "pending",
-        createdAt: Date.now(),
-        booked: [],
-        ...body,
-      };
-      const next = [created, ...list];
-      saveDresses(next);
-      return created;
-    }
+export class ApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
   }
-
-  // ---- single dress + sub-routes ----
-  if(parts[0] === "api" && parts[1] === "dresses" && parts.length >= 3){
-    const id = parts[2];
-    const list = loadDresses();
-    const idx = list.findIndex(d => d.id === id);
-    if(idx === -1) throw new ApiError("השמלה לא נמצאה");
-    const dress = list[idx];
-
-    // PATCH /api/dresses/:id  (edit fields)
-    if(parts.length === 3 && method === "PATCH"){
-      const updated = { ...dress, ...body };
-      const next = [...list]; next[idx] = updated; saveDresses(next);
-      return updated;
-    }
-    // PATCH /api/dresses/:id/booked  (toggle a date)
-    if(parts[3] === "booked" && method === "PATCH"){
-      const key = body.key;
-      const booked = dress.booked.includes(key)
-        ? dress.booked.filter(x => x !== key)
-        : [...dress.booked, key];
-      const updated = { ...dress, booked };
-      const next = [...list]; next[idx] = updated; saveDresses(next);
-      return updated;
-    }
-    // PATCH /api/dresses/:id/status  (admin approve/reject)
-    if(parts[3] === "status" && method === "PATCH"){
-      if(adminPw !== ADMIN_PASSWORD) throw new ApiError("אין הרשאה");
-      const updated = { ...dress, status: body.status, rejectReason: body.rejectReason || "" };
-      const next = [...list]; next[idx] = updated; saveDresses(next);
-      return updated;
-    }
-  }
-
-  // ---- auth ----
-  if(bare === "/api/auth/register" && method === "POST"){
-    const users = loadUsers();
-    if(users.some(u => u.phone === body.phone)) throw new ApiError("מספר הטלפון כבר רשום");
-    const user = { id: uid("user"), name: body.name, email: body.email, city: body.city, phone: body.phone, password: body.password };
-    saveUsers([...users, user]);
-    const { password, ...safe } = user;
-    return safe;
-  }
-  if(bare === "/api/auth/login" && method === "POST"){
-    const users = loadUsers();
-    const user = users.find(u => u.phone === body.phone && u.password === body.password);
-    if(!user) throw new ApiError("טלפון או סיסמה שגויים");
-    const { password, ...safe } = user;
-    return safe;
-  }
-  if(bare === "/api/admin/login" && method === "POST"){
-    return { ok: body.password === ADMIN_PASSWORD };
-  }
-
-  throw new ApiError("נתיב לא קיים: " + method + " " + path);
 }
 
-export async function api(path, { method = "GET", body, adminPw } = {}){
-  try{
-    const data = route(method, path, { body, adminPw });
-    return await wait(data);
-  }catch(e){
-    await wait(null);
-    throw e;
+/* Nest's exception filter returns { message, error, statusCode }, where
+   `message` is a string for most throws but an array of strings for
+   ValidationPipe failures. Flatten both into one readable line. */
+async function readError(res) {
+  let payload;
+  try {
+    payload = await res.json();
+  } catch {
+    return new ApiError(`שגיאת שרת (${res.status})`, res.status);
   }
+  const m = payload?.message;
+  const text = Array.isArray(m) ? m.join(", ") : m || payload?.error;
+  return new ApiError(text || `שגיאת שרת (${res.status})`, res.status);
+}
+
+/**
+ * @param {string} path    e.g. "/api/dresses?status=all"
+ * @param {object} [opts]
+ * @param {string} [opts.method]
+ * @param {object} [opts.body]     JSON-serialized
+ * @param {string} [opts.adminPw]  sent as the x-admin-password header
+ */
+export async function api(path, { method = "GET", body, adminPw } = {}) {
+  const headers = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (adminPw) headers["x-admin-password"] = adminPw;
+
+  let res;
+  try {
+    res = await fetch(withBase(path), {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    // Network-level failure (server down, DNS, CORS preflight refused).
+    throw new ApiError("לא ניתן להתחבר לשרת. נסי שוב בעוד רגע.", 0);
+  }
+
+  if (!res.ok) throw await readError(res);
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+/**
+ * How many booking inquiries reference this dress. Read before showing the
+ * owner's delete confirmation, so the dialog can warn that deleting the
+ * listing leaves those requests behind.
+ */
+export function getDressInquiryCount(dressId) {
+  return api(`/api/dresses/${encodeURIComponent(dressId)}/inquiry-count`);
+}
+
+/**
+ * Owner deletes their own listing, its photos, and its stored image files.
+ *
+ * `email` is the ownership proof — this app has no bearer token, so the
+ * backend matches it against the listing's own email (see
+ * DressesService.deleteDress). Resolves with nothing on success; throws
+ * ApiError(403) if the email doesn't match the listing.
+ */
+export function deleteDress(dressId, email) {
+  return api(`/api/dresses/${encodeURIComponent(dressId)}`, {
+    method: "DELETE",
+    body: { email },
+  });
+}
+
+/** Admin: append an already-uploaded photo URL to a dress's gallery. */
+export function adminAddDressImage(dressId, url, adminPw) {
+  return api(`/api/admin/dresses/${encodeURIComponent(dressId)}/images`, {
+    method: "POST",
+    adminPw,
+    body: { url },
+  });
+}
+
+/**
+ * Admin: remove one photo from a dress's gallery and from storage.
+ * Rejects with ApiError(400) when it's the listing's last photo.
+ * Both admin image calls resolve with the updated dress.
+ */
+export function adminRemoveDressImage(dressId, imageId, adminPw) {
+  return api(
+    `/api/admin/dresses/${encodeURIComponent(dressId)}/images/${encodeURIComponent(imageId)}`,
+    { method: "DELETE", adminPw },
+  );
+}
+
+/**
+ * Admin-only: turn selected listing photos into AI on-model photos.
+ *
+ * Resolves with one entry per requested image —
+ * `{ sourceImageId, generatedImageUrl, status, error? }` — and a mix of
+ * successes and errors is a normal outcome, not a thrown one. It only rejects
+ * if the request itself failed (bad password, unknown dress, network).
+ *
+ * Slower than every other call in this file: it's one metered generation per
+ * image, run concurrently server-side but still ~10s each. Callers should show
+ * per-thumbnail progress rather than a blocking spinner.
+ */
+export function aiGenerateDressPhotos(dressId, imageIds, adminPw) {
+  return api(`/api/admin/dresses/${encodeURIComponent(dressId)}/ai-generate`, {
+    method: "POST",
+    adminPw,
+    body: { imageIds },
+  });
+}
+
+/**
+ * Sends a 6-digit email OTP. Shared by registration, forgot-password, and
+ * account deletion — one code system, keyed only by email, no "purpose"
+ * field — so this is the same call AuthContext's own postJson makes for
+ * those flows, just going through the shared `api()` helper instead.
+ */
+export function sendOtp(email) {
+  return api("/api/auth/send-otp", { method: "POST", body: { email } });
+}
+
+/**
+ * Self-service account deletion: verifies the OTP and removes the account,
+ * its listings, and their images in one call (see UsersController /
+ * UsersService.deleteAccount on the backend). Booking inquiries the user
+ * sent are deliberately left behind as anonymized snapshots — see the
+ * backend for why.
+ */
+export function deleteAccount(email, code) {
+  return api("/api/auth/delete-account", { method: "POST", body: { email, code } });
+}
+
+/**
+ * Upload one listing photo and get back its public Supabase Storage URL.
+ * Sent as multipart rather than JSON — the bytes never pass through the
+ * dress record, only the resulting URL does.
+ */
+export async function uploadDressImage(file, dressId) {
+  const form = new FormData();
+  form.append("file", file);
+
+  const qs = dressId ? `?dressId=${encodeURIComponent(dressId)}` : "";
+  let res;
+  try {
+    // No Content-Type header: the browser sets the multipart boundary.
+    res = await fetch(withBase("/api/dresses/images" + qs), {
+      method: "POST",
+      body: form,
+    });
+  } catch {
+    throw new ApiError("לא ניתן להתחבר לשרת. נסי שוב בעוד רגע.", 0);
+  }
+
+  if (!res.ok) throw await readError(res);
+  const { url } = await res.json();
+  return url;
 }

@@ -1,64 +1,139 @@
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
+  Body,
+  Controller,
+  DefaultValuePipe,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Query,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { DressesService } from './dresses.service';
-import { Dress, DressStatus } from './dress.entity';
-import { AdminGuard, ADMIN_PASSWORD } from '../common/admin.guard';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { AdminGuard } from '../common/admin.guard';
+import { DressesService, ClientDress } from './dresses.service';
+import { StorageService, UploadedImage } from './storage.service';
+import { CreateDressDto } from './dto/create-dress.dto';
+import { UpdateDressDto } from './dto/update-dress.dto';
+import { ToggleBookedDateDto, UpdateDressStatusDto } from './dto/dress-admin.dto';
+import { DeleteDressDto } from './dto/delete-dress.dto';
 
+@ApiTags('dresses')
+// Prefix matches the other controllers (`api/auth`, `api/booking-inquiries`)
+// — there's no global prefix set in main.ts, so each controller carries it.
+// This used to be just 'dresses', which no client ever called; the frontend
+// has always used /api/... and went to the localStorage mock instead.
 @Controller('api/dresses')
 export class DressesController {
-  constructor(private readonly service: DressesService) {}
+  constructor(
+    private readonly service: DressesService,
+    private readonly storage: StorageService,
+  ) {}
 
-  // Public catalog. Defaults to approved. Admin can pass ?status=pending|approved|rejected|all
   @Get()
-  findAll(@Query('status') status?: string) {
-    return this.service.findAll(status || 'approved');
+  @ApiOperation({ summary: 'List dresses — ?status=approved (default) | pending | rejected | all' })
+  listDresses(
+    @Query('status', new DefaultValuePipe('approved')) status: string,
+  ): Promise<ClientDress[]> {
+    return this.service.listDresses(status);
+  }
+
+  /**
+   * Upload one listing photo and get back its public URL. Declared before
+   * `:id` routes — Nest matches in declaration order, so without this
+   * "images" would be captured as a dress id.
+   */
+  @Post('images')
+  @ApiOperation({ summary: 'Upload a listing photo to Supabase Storage' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadImage(
+    @UploadedFile() file: UploadedImage,
+    @Query('dressId') dressId?: string,
+  ): Promise<{ url: string }> {
+    const url = await this.storage.uploadDressImage(file, dressId || 'pending');
+    return { url };
+  }
+
+  @Post()
+  @ApiOperation({ summary: 'Publish a new dress listing (starts as pending)' })
+  createDress(@Body() dto: CreateDressDto): Promise<ClientDress> {
+    return this.service.createDress(dto);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  @ApiOperation({ summary: 'Get one dress' })
+  getDressById(@Param('id') id: string): Promise<ClientDress> {
+    return this.service.getDressById(id);
   }
 
-  // Publish — no auth required, lands as pending
-  @Post()
-  create(@Body() body: Partial<Dress>) {
-    return this.service.create(body);
-  }
-
-  // Edit listing fields (owner self-service in the demo)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: Partial<Dress>) {
-    return this.service.update(id, body);
+  @ApiOperation({ summary: "Edit a listing's fields and/or replace its images" })
+  updateDress(
+    @Param('id') id: string,
+    @Body() dto: UpdateDressDto,
+  ): Promise<ClientDress> {
+    return this.service.updateDress(id, dto);
   }
 
-  // Toggle a single availability date
   @Patch(':id/booked')
-  toggleBooked(@Param('id') id: string, @Body() body: { key?: string; booked?: string[] }) {
-    if (Array.isArray(body.booked)) return this.service.setBooked(id, body.booked);
-    return this.service.toggleBooked(id, body.key);
+  @ApiOperation({ summary: 'Toggle one day on the availability calendar' })
+  toggleBooked(
+    @Param('id') id: string,
+    @Body() dto: ToggleBookedDateDto,
+  ): Promise<ClientDress> {
+    return this.service.toggleBookedDate(id, dto.key);
   }
 
-  // ----- Admin-only -----
-  @UseGuards(AdminGuard)
   @Patch(':id/status')
-  setStatus(@Param('id') id: string, @Body() body: { status: DressStatus; rejectReason?: string }) {
-    return this.service.setStatus(id, body.status, body.rejectReason || '');
-  }
-
   @UseGuards(AdminGuard)
-  @Delete(':id')
-  async remove(@Param('id') id: string) {
-    await this.service.remove(id);
-    return { ok: true };
+  @ApiOperation({ summary: 'Admin: approve or reject a listing' })
+  updateStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateDressStatusDto,
+  ): Promise<ClientDress> {
+    return this.service.updateStatus(id, dto);
   }
-}
 
-@Controller('api/admin')
-export class AdminController {
-  // Lightweight password check so the frontend can gate the admin panel
-  @Post('login')
-  login(@Body() body: { password?: string }) {
-    return { ok: body?.password === ADMIN_PASSWORD };
+  /**
+   * How many booking inquiries point at this listing. Read by the owner's
+   * delete confirmation so it can say so before anything is destroyed.
+   * Returns only a count — no renter details — so it needs no gate beyond
+   * knowing the dress id.
+   */
+  @Get(':id/inquiry-count')
+  @ApiOperation({ summary: 'Number of booking inquiries referencing this dress' })
+  async getInquiryCount(@Param('id') id: string): Promise<{ count: number }> {
+    return { count: await this.service.countInquiries(id) };
+  }
+
+  /**
+   * Owner deletes their own listing. Not admin-gated — this is the
+   * user-facing action, separate from any moderation tooling. Ownership is
+   * checked in the service against the listing's email.
+   */
+  @Delete(':id')
+  @HttpCode(204)
+  @ApiOperation({ summary: "Owner: delete their own listing and its photos" })
+  async deleteDress(
+    @Param('id') id: string,
+    @Body() dto: DeleteDressDto,
+  ): Promise<void> {
+    await this.service.deleteDress(id, dto.email);
+  }
+
+  @Get(':id/similar')
+  @ApiOperation({ summary: 'Similar approved dresses (same colour or source)' })
+  getSimilarDresses(
+    @Param('id') id: string,
+    @Query('limit', new DefaultValuePipe(4), ParseIntPipe) limit: number,
+  ): Promise<ClientDress[]> {
+    return this.service.getSimilarDresses(id, limit);
   }
 }

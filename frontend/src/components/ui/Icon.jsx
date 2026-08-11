@@ -62,4 +62,28 @@ export const Icon = {
       <path d="M12 2a10 10 0 1 0 0 20 2.5 2.5 0 0 0 2.5-2.5c0-1.4-1-1.8-1-3a1.5 1.5 0 0 1 1.5-1.5H17a5 5 0 0 0 5-5c0-4.5-4.5-8-10-8Z" />
     </svg>
   ),
+  sort: (p) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3" />
+    </svg>
+  ),
+  instagram: (p) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.2" cy="6.8" r="0.6" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  facebook: (p) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M15 8.5h2V5h-2a4 4 0 0 0-4 4v2H9v3.5h2V21h3v-6.5h2.3l.7-3.5h-3V9a.5.5 0 0 1 .5-.5Z" />
+    </svg>
+  ),
+  whatsapp: (p) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      {/* Tabler-style "brand-whatsapp" outline: rounded chat-bubble-with-tail
+          plus the handset S-curve — the actual recognizable WhatsApp mark,
+          not just a generic phone glyph. */}
+      <path d="M3 21l1.65-3.8a9 9 0 1 1 3.4 2.9L3 21Z" />
+      <path d="M9 10a.5.5 0 0 0 1 0v-1a.5.5 0 0 0-1 0v1a5 5 0 0 0 5 5h1a.5.5 0 0 0 0-1h-1a.5.5 0 0 0 0 1" />
+    </svg>
+  ),
 };

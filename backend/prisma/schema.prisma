@@ -1,0 +1,277 @@
+// Prisma schema for the onenight dress-rental marketplace.
+// Database: Supabase (PostgreSQL).
+//   DATABASE_URL  — pooled connection (PgBouncer, port 6543) used at runtime
+//   DIRECT_URL    — direct connection (port 5432) used for migrations
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// NOTE: the DressCondition / DressSource / DressLength / SleeveLength enums
+// that used to live here were dropped when the dress flow moved off the
+// localStorage mock — those four columns are now plain text holding the
+// Hebrew labels the UI already uses. See the comment above `model Dress`.
+
+// Mirrors the (now-retired) TypeORM `users` entity field-for-field, so the
+// SQLite → Postgres move is a pure persistence swap with no behaviour change.
+// NOTE: `id` is app-generated (uuid) rather than mirroring auth.users.id from
+// Supabase Auth — the rows migrated out of SQLite already carry their own
+// uuids, and login is email+password via bcrypt, not Supabase Auth.
+model User {
+  id       String  @id @default(uuid())
+  name     String
+  email    String  @unique
+  phone    String?
+  // Deliberately nullable and NOT unique: it's a display-only handle derived
+  // from the email local-part (see UsersService.deriveUsername), never used
+  // for login or lookup. One migrated row already has NULL here, and derived
+  // handles can legitimately collide across different email domains.
+  username String?
+  city     String?
+  password String // bcrypt hash, stored as-is — never re-hashed
+  verified Boolean @default(false)
+  // Opt-out consent: the registration checkbox is checked by default, and the
+  // service falls back to `true` when a client omits the field.
+  marketingConsent Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  dresses          Dress[]
+  bookingsMade     Booking[]        @relation("renter")
+  bookingsReceived Booking[]        @relation("lister")
+  reviewsWritten   Review[]         @relation("reviewer")
+  favorites        Favorite[]
+  bookingInquiries BookingInquiry[] @relation("bookingInquiries")
+}
+
+// The publish/edit/browse UI is the only consumer of this model, so the
+// columns mirror that form's fields one-for-one (see PublishPage.jsx).
+//
+// `condition` / `source` / `dressLength` / `sleeveLength` are plain text
+// holding the Hebrew option labels ("כמו חדשה", "תפירה אישית", "ארוך", …)
+// rather than the enums they used to be. That's a deliberate call made when
+// migrating the dress flow off the localStorage mock: the mock stored the
+// Hebrew labels, and every filter/compare in App.jsx matches on them
+// directly, so keeping enums would have meant a translation layer on every
+// read and write. Trade-off: no DB-level constraint on these four columns —
+// the allowed values live in frontend/src/lib/data.js (CONDITIONS,
+// DRESS_LENGTHS, SLEEVE_LENGTHS) and are enforced by the DTO validators in
+// dto/create-dress.dto.ts. Keep those two lists in sync.
+model Dress {
+  id          String         @id @default(uuid())
+  // Renamed from `name`/`description` to match the form field names.
+  title       String
+  desc        String?
+  price       Float
+  fabric      String?
+  color       String?
+  // Hex swatch used by the card/placeholder rendering.
+  colorHex    String?
+  designer    String?
+  source      String
+  // Free-text shop name; only meaningful when `source` is "שם חנות".
+  store       String?
+  condition   String
+  dressLength  String
+  sleeveLength String
+  // Free-text city, distinct from `User.city`. Nullable/optional so existing
+  // listings created before this field don't break.
+  city         String?
+  // Delivery/pickup region, chosen from data.js REGIONS. Distinct from
+  // `city`: region is the coarse filter facet, city is free text.
+  region       String?
+  // Contact details captured on the listing itself. `email` also drives the
+  // "my listings" filter in AccountPage, and is what resolves `ownerId`
+  // server-side at create time.
+  phone        String?
+  email        String?
+  // The single size this listing is offered in. The `sizes` relation below
+  // predates the publish form and stays for the (dormant) multi-size
+  // booking flow; the form writes this scalar.
+  size         String?
+  ownerId      String
+  owner        User                @relation(fields: [ownerId], references: [id])
+  status       String              @default("pending") // pending | approved | rejected
+  // Admin's note when status is "rejected", surfaced to the owner in their
+  // listings view. Empty/null for pending and approved listings.
+  rejectReason String?
+  sizes        DressSize[]
+  images       DressImage[]
+  bookings     Booking[]
+  reviews      Review[]
+  favorites    Favorite[]
+  availability DressAvailability[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  @@index([color])
+  @@index([source])
+  @@index([ownerId])
+  @@index([dressLength])
+  @@index([sleeveLength])
+}
+
+model DressSize {
+  id        String  @id @default(uuid())
+  dress     Dress   @relation(fields: [dressId], references: [id], onDelete: Cascade)
+  dressId   String
+  size      String // XS, S, M, L, XL, XXL
+  available Boolean @default(true)
+
+  @@index([dressId])
+}
+
+// NOTE ON THE PRIMARY/COVER PHOTO: there is no `isPrimary` flag and no
+// `coverImageId` on Dress — the cover is whichever row has the lowest
+// `order`, i.e. `images[0]` in the client shape. Every consumer already
+// relies on that (AdminPage's row thumbnail, the gallery card, the detail
+// page's lead image), so the AI photo feature reuses it: promoting a
+// generated photo to cover means giving it order 0 and shifting the rest,
+// not introducing a second source of truth.
+model DressImage {
+  id      String @id @default(uuid())
+  dress   Dress  @relation(fields: [dressId], references: [id], onDelete: Cascade)
+  dressId String
+  url     String
+  order   Int
+  // True for photos produced by the admin-only AI on-model photo tool
+  // (AiPhotoService) rather than uploaded by the lister. Purely presentational
+  // — it drives the "AI" badge in the admin grid so the admin can tell a
+  // generated photo from an original upload. Nothing customer-facing branches
+  // on it.
+  isAiGenerated Boolean @default(false)
+
+  @@index([dressId])
+}
+
+// Owner-managed per-day override for a dress's availability. Absence of a
+// row for a given (dressId, date) means available — owners only need to
+// write a row for the days they want to block out, not populate the whole
+// calendar. Not yet read by any renter-facing flow (out of scope for now);
+// this is scoped to the owner's own management UI.
+model DressAvailability {
+  id      String   @id @default(uuid())
+  dress   Dress    @relation(fields: [dressId], references: [id], onDelete: Cascade)
+  dressId String
+  date    DateTime
+  status  String   @default("unavailable") // available | unavailable
+
+  @@unique([dressId, date])
+  @@index([dressId])
+}
+
+model Booking {
+  id        String   @id @default(uuid())
+  dress     Dress    @relation(fields: [dressId], references: [id], onDelete: Cascade)
+  dressId   String
+  startDate DateTime
+  endDate   DateTime
+  size      String
+  createdAt DateTime @default(now())
+
+  renterId    String
+  renter      User      @relation("renter", fields: [renterId], references: [id])
+  listerId    String
+  lister      User      @relation("lister", fields: [listerId], references: [id])
+  status      String    @default("pending") // pending | confirmed | declined | expired
+  requestedAt DateTime  @default(now())
+  respondsBy  DateTime // application code sets this = requestedAt + 24h
+  respondedAt DateTime?
+  // Back-relation for Review.booking's one-to-one @unique bookingId.
+  review      Review?
+
+  @@index([dressId])
+  @@index([startDate, endDate])
+  @@index([renterId])
+  @@index([listerId])
+}
+
+model Review {
+  id       String @id @default(uuid())
+  dress    Dress  @relation(fields: [dressId], references: [id], onDelete: Cascade)
+  dressId  String
+  reviewer String
+  rating   Int // 1–5
+  text     String
+  sizeWorn String
+  createdAt DateTime @default(now())
+
+  // NOTE: the brief asked for these new fields to include a relation field
+  // literally named `reviewer`, but this model already has an (unrelated,
+  // free-text) `reviewer String` column — keeping both under the same name
+  // isn't possible. Since the brief also said not to rename/delete any
+  // existing column, the old `reviewer` string is left untouched and the
+  // new user relation is named `reviewerUser` instead. Flag if you'd
+  // rather retire the free-text field in favor of the relation.
+  reviewerId   String
+  reviewerUser User     @relation("reviewer", fields: [reviewerId], references: [id])
+  revieweeId   String
+  bookingId    String   @unique // one review per completed booking
+  booking      Booking  @relation(fields: [bookingId], references: [id])
+
+  @@index([dressId])
+  @@index([reviewerId])
+}
+
+// Logs every click of the dress-detail page's "להזמנה" button (the WhatsApp
+// contact CTA — see ProductPage.jsx's book()), so admin can follow up and
+// check whether a deal closed. Deliberately NOT the same table as `Booking`
+// above: `Booking` is older, unrelated, currently-dormant infrastructure for
+// a full renter/lister request-response workflow (status, 24h SLA) — not a
+// payment schema (checked: no payment/stripe/checkout code or mentions
+// anywhere in this repo's history) — and this feature explicitly has no
+// status/workflow beyond "exists, can be deleted." Keeping them separate
+// avoids overloading Booking's semantics with this simpler logging use case.
+//
+// `renterId` is a genuine relation — this button already requires the
+// renter to be logged in, so there's always a real User row. `dressId` /
+// `dressTitle` / `ownerPhone` are a denormalized snapshot instead of
+// relations, because dresses (and their owners' listing-contact info)
+// currently live only in the frontend's localStorage mock, not in this
+// database — see the note on Dress's lack of a `phone` field. There is no
+// real Dress row for a foreign key to point at.
+model BookingInquiry {
+  id          String @id @default(uuid())
+
+  // Nullable, with onDelete: SetNull — so a renter deleting their account
+  // (UsersService.deleteAccount) doesn't get blocked by this FK and doesn't
+  // need this row deleted either. The row is already a self-contained
+  // snapshot (renterPhone/dressTitle/ownerPhone/dates captured at click
+  // time), same reasoning as Dress deletion leaving inquiries behind — see
+  // DressesService.deleteDress — so losing the link to a deleted account
+  // loses nothing the admin queue actually reads.
+  renterId    String?
+  renter      User?  @relation("bookingInquiries", fields: [renterId], references: [id], onDelete: SetNull)
+  renterPhone String // snapshot at click-time, independent of later profile edits
+
+  dressId     String // the mock system's dress id — app already routes to dress detail by this id
+  dressTitle  String
+  ownerPhone  String
+
+  selectedStartDate DateTime
+  selectedEndDate   DateTime
+
+  createdAt   DateTime @default(now())
+
+  @@index([renterId])
+  @@index([dressId])
+  @@index([createdAt])
+}
+
+model Favorite {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  dressId   String
+  dress     Dress    @relation(fields: [dressId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, dressId])
+  @@index([userId])
+  @@index([dressId])
+}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Icon } from "../ui/Icon.jsx";
 import { useScrolled } from "../../hooks/useScrolled.js";
 import { useBodyScrollLock } from "../../hooks/useBodyScrollLock.js";
@@ -7,17 +7,113 @@ import { useAuth } from "../../context/AuthContext.jsx";
 /* Bordeaux tone shared by the navbar's User + Menu icons and the wordmark. */
 const BORDEAUX = "#6B2D2D";
 
+/* Glassmorphism dropdown anchored under the User icon — same frosted-dark
+   family as the auth modal, with a slightly denser fill and a softer,
+   subtly-rounded corner treatment of its own. */
+const MENU_ITEM_STYLE = {
+  display: "block",
+  width: "100%",
+  padding: "11px 18px",
+  background: "transparent",
+  border: "none",
+  fontFamily: "'Assistant', system-ui, sans-serif",
+  fontSize: "0.88rem",
+  textAlign: "right",
+  color: "rgba(255,255,255,0.85)",
+  cursor: "pointer",
+  transition: "background-color 0.15s ease",
+};
+
+/* Signed-in dropdown: name header, nav links, then a visually distinct
+   logout row. Closes on outside click / Escape (wired by the parent). */
+function UserMenu({ name, onFavorites, onListings, onProfile, onLogout }) {
+  const hover = (e) => { e.currentTarget.style.background = "rgba(255,255,255,0.07)"; };
+  const unhover = (e) => { e.currentTarget.style.background = "transparent"; };
+
+  return (
+    <div
+      dir="rtl"
+      role="menu"
+      aria-label="תפריט משתמש"
+      style={{
+        position: "absolute",
+        top: "calc(100% + 10px)",
+        /* Anchored to the icon's own left edge, not its right — the icon
+           sits near the LEFT edge of the screen (dir=ltr header layout),
+           so a right-anchored menu had nowhere to expand and clipped off
+           the viewport on narrow screens. Expanding rightward from the
+           icon (toward the center) keeps it fully on-screen at every
+           breakpoint without needing per-breakpoint overrides. */
+        left: 0,
+        zIndex: 60,
+        minWidth: "220px",
+        maxWidth: "calc(100vw - 24px)",
+        maxHeight: "calc(100vh - 100px)",
+        overflowY: "auto",
+        background: "rgba(42, 31, 31, 0.94)",
+        backdropFilter: "blur(24px) saturate(1.4)",
+        WebkitBackdropFilter: "blur(24px) saturate(1.4)",
+        border: "1px solid rgba(196, 160, 160, 0.2)",
+        borderRadius: "12px",
+        boxShadow: "0 16px 48px rgba(0, 0, 0, 0.3)",
+        padding: "6px 0",
+      }}
+    >
+      <div
+        style={{
+          padding: "12px 18px",
+          fontFamily: "'Assistant', system-ui, sans-serif",
+          fontSize: "0.92rem",
+          fontWeight: 600,
+          color: "#fff",
+          textAlign: "right",
+        }}
+      >
+        {name}
+      </div>
+
+      <div style={{ height: "1px", background: "rgba(196,160,160,0.18)" }} />
+
+      <button type="button" role="menuitem" onClick={onFavorites} style={MENU_ITEM_STYLE} onMouseEnter={hover} onMouseLeave={unhover}>
+        המועדפים שלי
+      </button>
+      <button type="button" role="menuitem" onClick={onListings} style={MENU_ITEM_STYLE} onMouseEnter={hover} onMouseLeave={unhover}>
+        השמלות שלי
+      </button>
+      <button type="button" role="menuitem" onClick={onProfile} style={MENU_ITEM_STYLE} onMouseEnter={hover} onMouseLeave={unhover}>
+        פרטים אישיים
+      </button>
+
+      <div style={{ height: "1px", background: "rgba(196,160,160,0.18)" }} />
+
+      <button
+        type="button"
+        role="menuitem"
+        onClick={onLogout}
+        style={{ ...MENU_ITEM_STYLE, color: "#E3A9A9" }}
+        onMouseEnter={hover}
+        onMouseLeave={unhover}
+      >
+        התנתקות
+      </button>
+    </div>
+  );
+}
+
 /* Sticky 3-column navbar (User · logo · hamburger) with an RTL slide-in
    side menu. lucide-react is unavailable in this environment, so the
    project's inline Icon set / inline SVGs supply the matching glyphs. */
-export function SiteHeader({ go }) {
+export function SiteHeader({ go, goAccount }) {
   const scrolled = useScrolled(8);
   const [open, setOpen] = useState(false);
-  const { requestPublish } = useAuth();
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef(null);
+  const { isLoggedIn, account, openAuth, logout, requestPublish } = useAuth();
 
   useBodyScrollLock(open);
 
   const close = () => setOpen(false);
+  const closeUserMenu = () => setUserMenuOpen(false);
 
   /* Run a navigation action, then close the menu. */
   const navigate = (action) => {
@@ -29,6 +125,43 @@ export function SiteHeader({ go }) {
   const handlePublish = () => {
     setOpen(false);
     requestPublish();
+  };
+
+  /* User icon: signed out → open the shared auth modal; signed in → toggle
+     the dropdown. Closes on outside click / Escape while open. */
+  const handleUserClick = () => {
+    if (!isLoggedIn) {
+      openAuth();
+    } else {
+      setUserMenuOpen((v) => !v);
+    }
+  };
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const onPointerDown = (e) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) closeUserMenu();
+    };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") closeUserMenu();
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [userMenuOpen]);
+
+  const runFromMenu = (action) => {
+    closeUserMenu();
+    action();
+  };
+
+  const handleLogout = () => {
+    closeUserMenu();
+    logout();
+    go("home");
   };
 
   const links = [
@@ -57,15 +190,31 @@ export function SiteHeader({ go }) {
           dir="ltr"
           className="relative mx-auto flex h-[72px] max-w-[1280px] items-center justify-between px-6 lg:px-10"
         >
-          {/* LEFT — user account placeholder */}
-          <button
-            type="button"
-            aria-label="חשבון משתמש"
-            className="flex h-10 w-10 items-center justify-center rounded-full transition-colors hover:bg-brand-light"
-            style={{ color: BORDEAUX }}
-          >
-            <Icon.user width="20" height="20" className="block" />
-          </button>
+          {/* LEFT — user account: signed out opens the auth modal, signed
+              in opens this anchored dropdown */}
+          <div className="relative" ref={userMenuRef}>
+            <button
+              type="button"
+              aria-label="חשבון משתמש"
+              aria-haspopup="menu"
+              aria-expanded={userMenuOpen}
+              onClick={handleUserClick}
+              className="flex h-10 w-10 items-center justify-center rounded-full transition-colors hover:bg-brand-light"
+              style={{ color: BORDEAUX }}
+            >
+              <Icon.user width="20" height="20" className="block" />
+            </button>
+
+            {isLoggedIn && userMenuOpen && (
+              <UserMenu
+                name={account?.name || account?.email || "החשבון שלי"}
+                onFavorites={() => runFromMenu(() => go("favorites"))}
+                onListings={() => runFromMenu(() => goAccount("ads"))}
+                onProfile={() => runFromMenu(() => goAccount("account"))}
+                onLogout={handleLogout}
+              />
+            )}
+          </div>
 
           {/* CENTER — wordmark + tagline, absolutely centered */}
           <button
@@ -76,12 +225,12 @@ export function SiteHeader({ go }) {
           >
             <span
               dir="ltr"
-              className="font-display text-[26px] font-medium italic lowercase tracking-tight"
+              className="font-display text-[26px] font-medium italic tracking-tight"
               style={{ color: BORDEAUX }}
             >
-              onenight
+              oneNight
             </span>
-            <span className="mt-0.5 font-body text-[11px] font-medium tracking-[0.22em] text-muted">
+            <span className="mt-0.5 font-body text-[11px] font-medium tracking-[0.22em] text-muted" style={{ color: BORDEAUX }}>
               השכרת שמלות ערב
             </span>
           </button>
