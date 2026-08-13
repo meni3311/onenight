@@ -13,12 +13,12 @@ import { AdminGuard } from '../common/admin.guard';
 import { BookingInquiriesService } from './booking-inquiries.service';
 import { CreateBookingInquiryDto } from './dto/create-booking-inquiry.dto';
 
-// Declared as 'api/booking-inquiries' (not just 'booking-inquiries', unlike
-// DressesController) to match the api/auth convention UsersController/
-// OtpController use — there's no global prefix set in main.ts, and the
-// frontend's Vite dev proxy only forwards '/api/*' to this server.
+// The global 'api' prefix (see main.ts's app.setGlobalPrefix) supplies the
+// leading /api — the frontend's Vite dev proxy only forwards '/api/*' to
+// this server, and that's still true: the full route stays
+// /api/booking-inquiries.
 @ApiTags('booking-inquiries')
-@Controller('api/booking-inquiries')
+@Controller('booking-inquiries')
 export class BookingInquiriesController {
   constructor(private readonly service: BookingInquiriesService) {}
 

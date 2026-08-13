@@ -1308,16 +1308,26 @@ input[type=range] { accent-color: var(--rose); }
   color: #C4A0A0;
 }
 
-/* ---------- Toast ---------- */
+/* ---------- Toast ----------
+   Same frosted-glass family as ConfirmModal's dialog (translucent, blurred,
+   rose-bordered) instead of the plain near-black block this used to be —
+   that read as a generic system toast, nothing like the rest of the site.
+   Corners stay sharp (0) on purpose: the modal family is the one place on
+   the site with heavy rounding (its 20px card); everywhere else — buttons,
+   chips, cards — sits at 0–4px, and the toast follows that convention
+   rather than the modal's. */
 .toast {
   position: fixed;
   bottom: 28px;
   right: 50%;
   transform: translateX(50%);
-  background: var(--text);
-  color: var(--bg);
+  background: rgba(196, 160, 160, 0.55);
+  border: 1px solid rgba(196, 160, 160, 0.5);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  color: #2A1F1F;
   padding: 12px 24px;
-  border-radius: var(--r-sm);
+  border-radius: 0;
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.04em;
@@ -1325,6 +1335,14 @@ input[type=range] { accent-color: var(--rose); }
   box-shadow: var(--sh-lift);
   animation: fade 0.2s;
   white-space: nowrap;
+}
+/* Failure/validation variant (see Toast.jsx's ERROR_RE) — darker bordeaux
+   glass instead of the rose default, with cream text for contrast against
+   it, so an error still reads as visually distinct at a glance. */
+.toast-error {
+  background: rgba(107, 45, 45, 0.72);
+  border-color: rgba(107, 45, 45, 0.6);
+  color: #FAF6F1;
 }
 
 /* ---------- Admin & Account ---------- */
@@ -1444,6 +1462,59 @@ input[type=range] { accent-color: var(--rose); }
   .filters.collapsed .filters-body { display: none; }
   .footer { padding: 40px 24px; }
 }
+
+/* ---------- Admin panel: phone widths (375–430px) ----------
+   Scoped to .admin-row / .ai-panel / .tabs rather than changed globally,
+   so nothing outside the admin panel (or AccountPage's own already-stacked
+   .owner-row) shifts. Three actual problems here, not a cosmetic pass:
+
+   1. .admin-row never stacked below 820px — only the "my listings" variant
+      (.owner-row) did. At 375–430px the fixed 80px thumbnail left a ~180px
+      column for title/price/description/action buttons, which is what
+      "unusable" meant in practice.
+   2. .btn is `white-space: nowrap` by design (see the buttons section) —
+      fine for short labels, but the AI-generate button's label is dynamic
+      Hebrew text ("✨ AI Imagine — הוספת 6 תמונות לגלריה") that can be wider
+      than the whole screen. `nowrap` doesn't wrap between flex items, it
+      stops a single button's own text from wrapping, so that one button
+      was pushing the page into horizontal scroll.
+   3. .tab / .btn padding was sized for a mouse pointer, not a thumb.
+
+   None of this needed a rebuild — the admin panel was already flexbox
+   throughout (.admin-row, .tabs, .thumbs all flex-wrap), so this is
+   breakpoint-only, same as the rest of the file. */
+@media (max-width: 480px) {
+  .container { padding: 0 16px; }
+
+  /* Same "image on top, full width" pattern .owner-row already uses on
+     AccountPage — applied here at phone widths only, so the moderation
+     queue's side-by-side layout is untouched on tablet/desktop. */
+  .admin-row { flex-direction: column; padding: 16px; gap: 14px; }
+  .admin-row img { width: 100%; height: auto; aspect-ratio: 3 / 4; object-fit: cover; }
+
+  /* Letting text wrap (rather than overriding nowrap on every .btn
+     site-wide) is what stops the long AI-generate label from forcing
+     horizontal scroll; centering + flex-grow keeps wrapped buttons looking
+     like buttons instead of ragged-left text blocks. Also lifts every
+     admin/AI-panel button to a comfortable ~44px touch target. */
+  .admin-row .btn,
+  .ai-panel .btn {
+    white-space: normal;
+    text-align: center;
+    flex: 1 1 auto;
+    min-height: 44px;
+    padding: 12px 16px;
+  }
+
+  .ai-panel { padding: 12px; }
+  .thumbs { gap: 8px; }
+
+  /* Tabs are the admin panel's primary navigation — worth a dedicated
+     touch target even though the same .tab class also appears on
+     AccountPage, where the same sizing is harmless. */
+  .tab { min-height: 44px; display: inline-flex; align-items: center; }
+}
+
 /* ============================================================
    onenight luxury redesign — Tailwind companion styles
    (only what utility classes can't express: range thumbs, etc.)

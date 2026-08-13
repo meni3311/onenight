@@ -21,8 +21,10 @@ class AdminLoginDto {
  * password with no rate limiting, no sessions, no audit trail. Replace with
  * real auth before this matters.
  */
+// The global 'api' prefix (see main.ts's app.setGlobalPrefix) supplies the
+// leading /api — full route stays /api/admin/login.
 @ApiTags('admin')
-@Controller('api/admin')
+@Controller('admin')
 export class AdminController {
   @Post('login')
   @ApiOperation({ summary: 'Check the admin password' })

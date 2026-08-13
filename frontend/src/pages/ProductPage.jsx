@@ -2,6 +2,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { Img } from "../components/ui/Img.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock.js";
+import { withBase } from "../lib/api.js";
 
 /* ============================================================================
    ProductPage — full dedicated dress page (mobile-first, RTL).
@@ -251,12 +252,14 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
      page (see backend/src/booking-inquiries). Deliberately doesn't await
      or block on this — a failed/slow log must never delay or break the
      WhatsApp flow below, which is the actual user-facing behavior and is
-     untouched. Goes straight to the real backend via fetch(), same as
-     AuthContext's calls — this doesn't exist in the mock lib/api.js router
-     (dresses/admin there are mock-only; this is real, persisted data). */
+     untouched. Goes straight to the real backend via fetch() rather than
+     the api() helper (same as AuthContext's calls), but still routed
+     through withBase() so it reaches the right origin once frontend and
+     backend are deployed separately (Vercel/Render) instead of assuming
+     same-origin. */
   const logBookingInquiry = () => {
     if (!account?.id) return; // isLoggedIn is already required to reach this point; belt-and-suspenders
-    fetch("/api/booking-inquiries", {
+    fetch(withBase("/api/booking-inquiries"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

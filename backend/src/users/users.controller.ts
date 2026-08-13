@@ -7,7 +7,10 @@ import { VerifyRegistrationDto } from './dto/verify-registration.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { DeleteAccountDto } from './dto/delete-account.dto';
 
-@Controller('api/auth')
+// The global 'api' prefix (see main.ts's app.setGlobalPrefix) supplies the
+// leading /api — full routes stay /api/auth/..., same as OtpController,
+// which shares this path.
+@Controller('auth')
 export class UsersController {
   constructor(
     private readonly service: UsersService,

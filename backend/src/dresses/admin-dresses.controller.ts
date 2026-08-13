@@ -18,14 +18,14 @@ import { AddImageDto } from './dto/add-image.dto';
  * greppable and means AdminGuard is declared once at the class level — no risk
  * of a future route on this controller shipping unguarded.
  *
- * Note the `api/` prefix: main.ts sets no global prefix, so every controller in
- * this codebase carries it. The brief wrote the path as
+ * The global 'api' prefix (see main.ts's app.setGlobalPrefix) supplies the
+ * leading /api. The brief wrote the path as
  * `/admin/dresses/:dressId/ai-generate`; it's mounted at
  * `/api/admin/dresses/:dressId/ai-generate` to match the existing convention
  * (and `api/admin/login`, which the same admin screen already calls).
  */
 @ApiTags('admin')
-@Controller('api/admin/dresses')
+@Controller('admin/dresses')
 @UseGuards(AdminGuard)
 export class AdminDressesController {
   constructor(private readonly service: DressesService) {}

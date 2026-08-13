@@ -1,0 +1,18 @@
+{
+  // Standard Nest CLI build config — `nest build` reads this (see
+  // nest-cli.json's compilerOptions.tsConfigPath) instead of tsconfig.json
+  // directly. Its only job is excluding non-app .ts files from compilation.
+  //
+  // "scripts" matters here specifically: those are standalone one-off
+  // migration/verification utilities (run manually with ts-node, never
+  // imported by src/), but with no "include"/"rootDir" anywhere, TypeScript
+  // computed rootDir as the common ancestor of every compiled file. With
+  // scripts/*.ts sitting next to src/, that ancestor was the backend/
+  // folder itself, so the build nested its output under dist/src/... and
+  // dist/scripts/... instead of flat dist/... — which is why
+  // `node dist/main.js` (package.json's start:prod) couldn't find the file
+  // on Render. Excluding scripts/ here narrows the compiled set back down
+  // to src/**, so rootDir resolves to src/ and dist/main.js exists again.
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", "test", "dist", "scripts", "**/*spec.ts"]
+}
