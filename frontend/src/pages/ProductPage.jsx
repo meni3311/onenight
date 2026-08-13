@@ -68,7 +68,7 @@ function rangeSummary(start, end) {
 }
 
 /* ---------------------------------------------------------------- Gallery */
-function Gallery({ images, color, label, fav, onFav, onBack }) {
+function Gallery({ images, photos, color, label, fav, onFav, onBack }) {
   const [idx, setIdx] = useState(0);
   const touchX = useRef(null);
   const n = images.length;
@@ -89,6 +89,12 @@ function Gallery({ images, color, label, fav, onFav, onBack }) {
     <section className="op-gallery" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <Img
         src={images[idx]}
+        /* Indexed by the same cursor as `images`, so the variants always
+           belong to the slide on screen. Undefined for legacy photos, which
+           just means no srcset. */
+        photo={photos?.[idx]}
+        /* Full-bleed on mobile, capped by the detail column on desktop. */
+        sizes="(min-width: 1024px) 640px, 100vw"
         color={color}
         label={label}
         className="op-gallery-img"
@@ -296,7 +302,7 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
       <div className="op-scroll">
         {/* SECTION 1 — full-bleed gallery */}
         <div className="op-anim" style={{ animationDelay: "0ms" }}>
-          <Gallery images={images} color={d.colorHex} label={d.title} fav={fav} onFav={() => onFav(d.id)} onBack={onClose} />
+          <Gallery images={images} photos={d.photos} color={d.colorHex} label={d.title} fav={fav} onFav={() => onFav(d.id)} onBack={onClose} />
         </div>
 
         {/* SECTION 2 — identity */}
@@ -386,7 +392,9 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
             <div className="op-similar">
               {similar.slice(0, 6).map((s) => (
                 <button key={s.id} type="button" className="op-sim-card" onClick={() => onOpenSimilar && onOpenSimilar(s)}>
-                  <Img src={s.images?.[0]} color={s.colorHex} label={s.title} className="op-sim-img" />
+                  {/* 140px fixed-width rail card — the 400w variant is
+                      always the right pick, so no sizes list is needed. */}
+                  <Img src={s.images?.[0]} photo={s.photos?.[0]} sizes="140px" color={s.colorHex} label={s.title} className="op-sim-img" />
                   <span className="op-sim-name">{s.title}</span>
                   <span className="op-sim-price">₪{s.price}</span>
                 </button>
