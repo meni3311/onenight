@@ -16,15 +16,6 @@ function ProductCardBase({ d, fav, onFav, onOpen, priority = false }) {
       <div className="relative aspect-[3/4] overflow-hidden rounded-none bg-neutral-100" style={{ borderRadius: 0 }}>
         <Img
           src={d.images[0]}
-          /* Same first image as `src`, but carrying its resized variants.
-             Optional-chained because `photos` is absent on anything that
-             didn't come from the API (and null variants simply mean no
-             srcset — see Img). */
-          photo={d.photos?.[0]}
-          /* Grid is 2 cols below lg, 3 at lg, 4 at xl, inside a max-w
-             container — so a card is roughly half the viewport on mobile
-             and a quarter on desktop. */
-          sizes="(min-width: 1280px) 25vw, (min-width: 1024px) 33vw, 50vw"
           color={d.colorHex}
           label={d.title}
           priority={priority}

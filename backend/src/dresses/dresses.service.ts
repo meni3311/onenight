@@ -35,14 +35,6 @@ export interface ClientDressPhoto {
   id: string;
   url: string;
   isAiGenerated: boolean;
-  /**
-   * Resized variants for a srcset, or null where none exist. Null is the
-   * normal case for photos uploaded before the resizing pipeline — the
-   * client falls back to `url` rather than requesting a missing object.
-   */
-  url400: string | null;
-  url800: string | null;
-  url1200: string | null;
 }
 
 export interface ClientDress {
@@ -144,19 +136,6 @@ export class DressesService {
    */
   private browseCache: { data: ClientDress[]; expiresAt: number } | null = null;
 
-  /**
-   * Row data for a new DressImage.
-   *
-   * Variant URLs are derived from the stored object's path rather than
-   * passed in, because the publish flow uploads photos first and posts back
-   * bare URL strings — StorageService is the only thing that knows whether
-   * a given object was written with variants. Every DressImage creation
-   * goes through here so no path can silently skip them.
-   */
-  private imageData(url: string, order: number, isAiGenerated = false) {
-    return { url, order, isAiGenerated, ...this.storage.variantsFor(url) };
-  }
-
   private toClient(d: DressWithRelations): ClientDress {
     return {
       id: d.id,
@@ -185,9 +164,6 @@ export class DressesService {
         id: img.id,
         url: img.url,
         isAiGenerated: img.isAiGenerated,
-        url400: img.url400,
-        url800: img.url800,
-        url1200: img.url1200,
       })),
       booked: d.availability
         .filter((a) => a.status === 'unavailable')
@@ -278,7 +254,7 @@ export class DressesService {
         email,
         ownerId: owner.id,
         images: images?.length
-          ? { create: images.map((url, order) => this.imageData(url, order)) }
+          ? { create: images.map((url, order) => ({ url, order })) }
           : undefined,
       },
       include: CLIENT_INCLUDE,
@@ -317,7 +293,9 @@ export class DressesService {
         await tx.dressImage.createMany({
           data: images.map((url, order) => ({
             dressId: id,
-            ...this.imageData(url, order, aiUrls.has(url)),
+            url,
+            order,
+            isAiGenerated: aiUrls.has(url),
           })),
         });
       }
@@ -473,7 +451,9 @@ export class DressesService {
           await tx.dressImage.create({
             data: {
               dressId,
-              ...this.imageData(generatedUrls[0], 0, true),
+              url: generatedUrls[0],
+              order: 0,
+              isAiGenerated: true,
             },
           });
           return;
@@ -488,7 +468,9 @@ export class DressesService {
         await tx.dressImage.createMany({
           data: generatedUrls.map((url, i) => ({
             dressId,
-            ...this.imageData(url, start + i, true),
+            url,
+            order: start + i,
+            isAiGenerated: true,
           })),
         });
       });
@@ -650,7 +632,7 @@ export class DressesService {
     }
 
     await this.prisma.dressImage.create({
-      data: { dressId, ...this.imageData(url, (last?.order ?? -1) + 1) },
+      data: { dressId, url, order: (last?.order ?? -1) + 1 },
     });
     this.invalidateBrowseCache();
     return this.getDressById(dressId);
