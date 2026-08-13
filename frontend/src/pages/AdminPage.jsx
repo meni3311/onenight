@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { placeholder } from "../lib/data.js";
-import { api } from "../lib/api.js";
+import { api, withBase } from "../lib/api.js";
 import { AdminPhotosPanel } from "../components/admin/AdminPhotosPanel.jsx";
 import { useSessionStorage } from "../hooks/useSessionStorage.js";
 
@@ -60,7 +60,7 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
   const loadInquiries = async () => {
     setInquiriesLoading(true);
     try {
-      const res = await fetch("/api/booking-inquiries", { headers: { "x-admin-password": pw } });
+      const res = await fetch(withBase("/api/booking-inquiries"), { headers: { "x-admin-password": pw } });
       if (!res.ok) throw new Error("שגיאת שרת");
       setInquiries(await res.json());
     } catch (e) {
@@ -112,7 +112,7 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
 
   const deleteInquiry = async (id) => {
     try {
-      const res = await fetch("/api/booking-inquiries/" + id, {
+      const res = await fetch(withBase("/api/booking-inquiries/" + id), {
         method: "DELETE",
         headers: { "x-admin-password": pw },
       });

@@ -25,11 +25,10 @@ import { ToggleBookedDateDto, UpdateDressStatusDto } from './dto/dress-admin.dto
 import { DeleteDressDto } from './dto/delete-dress.dto';
 
 @ApiTags('dresses')
-// Prefix matches the other controllers (`api/auth`, `api/booking-inquiries`)
-// — there's no global prefix set in main.ts, so each controller carries it.
-// This used to be just 'dresses', which no client ever called; the frontend
-// has always used /api/... and went to the localStorage mock instead.
-@Controller('api/dresses')
+// The global 'api' prefix (see main.ts's app.setGlobalPrefix) supplies the
+// leading /api — this controller only owns its own sub-path, so the full
+// route is still /api/dresses/...
+@Controller('dresses')
 export class DressesController {
   constructor(
     private readonly service: DressesService,

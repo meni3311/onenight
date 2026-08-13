@@ -8,8 +8,10 @@ import type {
   UnavailableDateRange,
 } from '../types/dress.types';
 
+// Same env var as lib/api.js's withBase() — one name for the backend's
+// origin across the whole app, not a second one just for this module.
 const API_BASE: string =
-  (import.meta.env.VITE_API_URL as string | undefined) ?? '';
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {

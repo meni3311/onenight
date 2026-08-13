@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useRef, useEffect } from "react";
 import { Icon } from "../components/ui/Icon.jsx";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock.js";
 import { useLocalStorage } from "../hooks/useLocalStorage.js";
+import { withBase } from "../lib/api.js";
 
 const BORDEAUX = "#6B2D2D";
 const OTP_LENGTH = 6;
@@ -27,9 +28,13 @@ const inputStyle = {
   textAlign: "right",
 };
 
-/* POST JSON to the backend; throws Error(message) on non-2xx. */
+/* POST JSON to the backend; throws Error(message) on non-2xx.
+   Routed through withBase() (see lib/api.js) rather than a bare relative
+   fetch — on the deployed split-origin setup (Vercel frontend, Render
+   backend) a relative "/api/..." path would hit Vercel itself, which has
+   no backend, and 404. */
 async function postJson(path, body) {
-  const res = await fetch(path, {
+  const res = await fetch(withBase(path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

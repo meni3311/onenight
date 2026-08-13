@@ -7,8 +7,29 @@ import { AppModule } from './app.module';
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
 
-  // Allow the frontend to call the API from any origin during local dev.
-  app.enableCors({ origin: true });
+  // Every controller used to carry its own literal 'api/' segment in its
+  // @Controller() decorator (there was no global prefix at all). Now there
+  // is one, and those per-controller prefixes were removed to match — see
+  // each controller's @Controller() decorator — so every route still
+  // resolves to the exact same path as before (e.g. /api/dresses,
+  // /api/health), just assembled by Nest once instead of hand-repeated in
+  // seven files. Nothing needs excluding: ServeStaticModule (which serves
+  // the frontend build) defaults `useGlobalPrefix` to false, so it keeps
+  // serving unprefixed at "/" regardless — see app.module.ts.
+  app.setGlobalPrefix('api');
+
+  // CORS: locked to the deployed frontend's origin in production via
+  // FRONTEND_URL (set on Render), never hardcoded here. Falls back to
+  // reflecting any origin when FRONTEND_URL isn't set, which keeps local
+  // dev and this repo's "one command, one URL" self-hosted mode (see
+  // README) working without a .env entry — Vite's dev proxy makes API
+  // calls same-origin anyway, so this fallback mostly only matters for
+  // hitting the API directly (curl, Swagger at /docs).
+  app.enableCors({
+    origin: process.env.FRONTEND_URL || true,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  });
 
   // Validate + strip unknown fields on every DTO.
   app.useGlobalPipes(

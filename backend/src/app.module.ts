@@ -9,6 +9,7 @@ import { UsersModule } from './users/users.module';
 import { AuthOtpModule } from './auth-otp/auth-otp.module';
 import { BookingInquiriesModule } from './booking-inquiries/booking-inquiries.module';
 import { AdminController } from './common/admin.controller';
+import { HealthController } from './common/health.controller';
 
 @Module({
   imports: [
@@ -31,7 +32,8 @@ import { AdminController } from './common/admin.controller';
     AuthOtpModule,
     BookingInquiriesModule,
   ],
-  // Standalone: just the admin password check, no service of its own.
-  controllers: [AdminController],
+  // Standalone controllers with no service/module of their own: the admin
+  // password check and the health probe.
+  controllers: [AdminController, HealthController],
 })
 export class AppModule {}

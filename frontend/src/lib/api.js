@@ -12,13 +12,18 @@
    ============================================================ */
 
 /* Dev goes through Vite's proxy (see vite.config.js), which forwards
-   /api → http://localhost:3000. In production set VITE_API_BASE_URL to
-   the deployed API origin. */
+   /api → http://localhost:3000. In production (frontend on Vercel, backend
+   on Render — different origins) set VITE_API_BASE_URL to the deployed API
+   origin, e.g. https://onenight-api.onrender.com — see .env.example. */
 const BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
-/* Callers pass the full "/api/..." path, matching the backend controllers
-   (which carry the api/ prefix themselves — there's no global prefix). */
-const withBase = (path) => BASE + path;
+/* Callers pass the full "/api/..." path, matching the backend's global
+   prefix (see backend/src/main.ts). Exported so every other place in the
+   app that talks to the backend with a raw fetch() — AuthContext's OTP
+   calls, AdminPage's booking-inquiries calls, ProductPage's inquiry log —
+   goes through this same BASE instead of assuming same-origin, which only
+   holds locally behind the Vite proxy. */
+export const withBase = (path) => BASE + path;
 
 export class ApiError extends Error {
   constructor(message, status) {
