@@ -19,11 +19,9 @@ function ProductCardBase({ d, fav, onFav, onOpen, priority = false }) {
           color={d.colorHex}
           label={d.title}
           priority={priority}
-          /* Intrinsic 3:4 so the browser reserves the right box before CSS
-             arrives. The wrapper's aspect-[3/4] is a Tailwind class, and
-             Tailwind is currently applied by a runtime CDN script — until it
-             executes there is no reserved height, so these attributes are
-             what actually prevents the grid shifting on first paint. */
+          /* Intrinsic 3:4 so the browser reserves the right box before the
+             stylesheet applies, rather than reflowing the grid once the
+             wrapper's aspect-[3/4] kicks in. */
           width={300}
           height={400}
           className="h-full w-full rounded-none object-cover transition-transform duration-[400ms] ease-out group-hover:scale-[1.03]"
