@@ -5,22 +5,39 @@ import {
   Logger,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import {
+  DeleteObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 
 /**
- * Uploads listing photos to Supabase Storage.
+ * Uploads listing photos to Cloudflare R2.
  *
- * Talks to the Storage REST API with `fetch` rather than pulling in
- * `@supabase/supabase-js` — the backend needs exactly two calls (upload, build
- * public URL) and adding an SDK for that is not worth the dependency.
+ * R2 speaks the S3 API, so this uses the AWS SDK rather than a Cloudflare
+ * client. Two differences from real S3 are worth knowing:
  *
- * Requires two env vars beyond the existing DATABASE_URL/DIRECT_URL:
- *   SUPABASE_URL               https://<project-ref>.supabase.co
- *   SUPABASE_SERVICE_ROLE_KEY  Settings → API → service_role (SECRET — server
- *                              only, never expose to the browser; it bypasses
- *                              RLS)
+ *   - the region is always the literal string "auto" (R2 has no regions in the
+ *     S3 sense; where the data lives is a bucket-creation setting), and
+ *   - the endpoint must be given explicitly, since the SDK would otherwise
+ *     build an amazonaws.com hostname.
+ *
+ * Public URLs do not come from the S3 endpoint. The API endpoint is
+ * credential-gated; serving happens on a separate public hostname — either the
+ * bucket's r2.dev subdomain or a custom domain — which is why
+ * R2_PUBLIC_BASE_URL is configured independently of the account id.
+ *
+ * Required env vars (beyond DATABASE_URL/DIRECT_URL):
+ *   R2_ACCOUNT_ID          Cloudflare account id (R2 → Overview, or the hex
+ *                          string in the dashboard URL)
+ *   R2_ACCESS_KEY_ID       R2 → Manage API tokens → Object Read & Write
+ *   R2_SECRET_ACCESS_KEY   shown once when the token is created (SECRET)
+ *   R2_BUCKET              bucket name (defaults to "dress-images")
+ *   R2_PUBLIC_BASE_URL     public origin for reads, no trailing slash, e.g.
+ *                          https://pub-<hash>.r2.dev or https://img.example.com
  */
 
-const BUCKET = 'dress-images';
+const DEFAULT_BUCKET = 'dress-images';
 const MAX_BYTES = 10 * 1024 * 1024; // keep in step with the bucket's limit
 const ALLOWED_MIME: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -40,24 +57,51 @@ export interface UploadedImage {
 export class StorageService {
   private readonly logger = new Logger(StorageService.name);
 
-  private get baseUrl(): string {
-    const url = process.env.SUPABASE_URL;
-    if (!url) {
+  /**
+   * Built once and reused. A fresh S3Client per request would mean a fresh
+   * connection pool per request, which is the pattern that made the old
+   * database setup slow — no reason to repeat it here.
+   */
+  private client?: S3Client;
+
+  private env(name: string): string {
+    const value = process.env[name];
+    if (!value) {
       throw new InternalServerErrorException(
-        'SUPABASE_URL is not set — cannot upload images',
+        `${name} is not set — cannot upload images`,
       );
     }
-    return url.replace(/\/+$/, '');
+    return value;
   }
 
-  private get serviceKey(): string {
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!key) {
-      throw new InternalServerErrorException(
-        'SUPABASE_SERVICE_ROLE_KEY is not set — cannot upload images',
-      );
+  private get bucket(): string {
+    return process.env.R2_BUCKET || DEFAULT_BUCKET;
+  }
+
+  /** Public read origin, trailing slash stripped so joins stay predictable. */
+  private get publicBaseUrl(): string {
+    return this.env('R2_PUBLIC_BASE_URL').replace(/\/+$/, '');
+  }
+
+  private get s3(): S3Client {
+    if (!this.client) {
+      const accountId = this.env('R2_ACCOUNT_ID');
+      this.client = new S3Client({
+        region: 'auto',
+        endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+        credentials: {
+          accessKeyId: this.env('R2_ACCESS_KEY_ID'),
+          secretAccessKey: this.env('R2_SECRET_ACCESS_KEY'),
+        },
+        // The SDK started sending a CRC32 checksum header on every request by
+        // default. R2 rejects requests carrying checksum headers it did not
+        // ask for, so uploads fail with a signature error that reads like a
+        // credentials problem. Sending checksums only where the API requires
+        // them keeps R2 happy without weakening anything.
+        requestChecksumCalculation: 'WHEN_REQUIRED',
+      });
     }
-    return key;
+    return this.client;
   }
 
   /**
@@ -93,7 +137,8 @@ export class StorageService {
    * difference (the `isAiGenerated` flag on DressImage is what marks it).
    *
    * Validates the fetched bytes against the same MIME/size rules as a user
-   * upload, because the bucket enforces them regardless of who is calling.
+   * upload, because the bucket's contract is the same regardless of who is
+   * calling.
    */
   async uploadFromUrl(sourceUrl: string, dressId = 'pending'): Promise<string> {
     let res: Response;
@@ -133,48 +178,48 @@ export class StorageService {
    * BEST-EFFORT IS DELIBERATE: callers delete the database row too, and the
    * row is the source of truth for what a listing shows. If the bucket
    * delete fails, the worst outcome is an unreferenced file costing storage;
-   * if we threw instead, a transient Storage error would block the user from
+   * if we threw instead, a transient storage error would block the user from
    * deleting their own listing, which is the far worse failure. Failures are
    * logged so they can be swept up later.
    *
-   * Silently ignores URLs that don't belong to our bucket. Listings created
-   * before the Supabase migration can still hold external URLs (and base64
-   * data URLs), and those have nothing for us to delete.
+   * Silently ignores URLs that don't belong to our bucket. That covers old
+   * Supabase Storage URLs, external URLs, and base64 data URLs left over from
+   * earlier versions of the listing flow — none of which we can delete, and
+   * none of which should stop a listing from being removed.
    */
   async deleteByPublicUrl(url: string): Promise<void> {
     const objectPath = this.objectPathFromPublicUrl(url);
     if (!objectPath) return;
 
-    const endpoint = `${this.baseUrl}/storage/v1/object/${BUCKET}/${objectPath}`;
     try {
-      const res = await fetch(endpoint, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${this.serviceKey}` },
-      });
-      // 404 means it's already gone — that's the desired end state, not a
-      // failure worth logging.
-      if (!res.ok && res.status !== 404) {
-        const detail = await res.text().catch(() => '');
-        this.logger.warn(
-          `Storage delete failed for ${objectPath}: ${res.status} ${res.statusText} ${detail}`,
-        );
-      }
+      await this.s3.send(
+        new DeleteObjectCommand({ Bucket: this.bucket, Key: objectPath }),
+      );
+      // S3 delete is idempotent: removing a key that isn't there succeeds,
+      // which is the desired end state anyway.
     } catch (err) {
-      this.logger.warn(`Storage delete threw for ${objectPath}`, err as Error);
+      this.logger.warn(`Storage delete failed for ${objectPath}`, err as Error);
     }
   }
 
   /**
    * Inverse of the URL built at the end of `put`. Returns null when `url`
-   * isn't a public URL for this project's bucket.
+   * isn't a public URL for our bucket.
    *
-   * Compared against our own configured base URL rather than pattern-matched
-   * loosely, so a URL pointing at some other Supabase project can't be
-   * coerced into a delete against ours.
+   * Compared against our own configured public base rather than pattern-matched
+   * loosely, so a URL pointing at some other bucket can't be coerced into a
+   * delete against ours.
    */
   private objectPathFromPublicUrl(url: string): string | null {
     if (!url) return null;
-    const prefix = `${this.baseUrl}/storage/v1/object/public/${BUCKET}/`;
+    let prefix: string;
+    try {
+      prefix = `${this.publicBaseUrl}/`;
+    } catch {
+      // Storage isn't configured. Deletion is best-effort, so treat the URL as
+      // not ours rather than failing the caller's delete.
+      return null;
+    }
     if (!url.startsWith(prefix)) return null;
     const path = url.slice(prefix.length).split('?')[0];
     return path || null;
@@ -188,34 +233,25 @@ export class StorageService {
     dressId: string,
   ): Promise<string> {
     const objectPath = `${dressId}/${randomUUID()}.${ext}`;
-    const endpoint = `${this.baseUrl}/storage/v1/object/${BUCKET}/${objectPath}`;
 
-    let res: Response;
     try {
-      res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.serviceKey}`,
-          'Content-Type': mimetype,
-          'x-upsert': 'false',
-        },
-        body: new Uint8Array(buffer),
-      });
+      await this.s3.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: objectPath,
+          Body: buffer,
+          ContentType: mimetype,
+          // Listing photos never change once written — the flow replaces the
+          // DressImage row with a new object rather than overwriting one — so
+          // they can be cached hard at the edge.
+          CacheControl: 'public, max-age=31536000, immutable',
+        }),
+      );
     } catch (err) {
       this.logger.error(`Storage upload failed for ${objectPath}`, err as Error);
       throw new InternalServerErrorException('העלאת התמונה נכשלה');
     }
 
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '');
-      this.logger.error(
-        `Storage rejected ${objectPath}: ${res.status} ${res.statusText} ${detail}`,
-      );
-      // A 404 here almost always means the bucket doesn't exist yet — see
-      // supabase/migrations/003_dress_images_bucket.sql.
-      throw new InternalServerErrorException('העלאת התמונה נכשלה');
-    }
-
-    return `${this.baseUrl}/storage/v1/object/public/${BUCKET}/${objectPath}`;
+    return `${this.publicBaseUrl}/${objectPath}`;
   }
 }
