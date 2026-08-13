@@ -173,14 +173,20 @@ export default function App() {
     return () => el.classList.remove("hide-viewport-scrollbar");
   }, [route]);
 
-  const dressById = (id) => dresses.find((d) => d.id === id);
-  const toggleFav = (id) =>
-    setFavIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
-  const go = (r) => {
+  /* These three are passed down through the whole tree, so a fresh identity
+     on every render defeats React.memo on anything below them (notably
+     ProductCard, which is on screen once per listing). setFavIds/setRoute
+     are useState setters and stable, so the dependency lists are honest. */
+  const dressById = useCallback((id) => dresses.find((d) => d.id === id), [dresses]);
+  const toggleFav = useCallback(
+    (id) => setFavIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id])),
+    [setFavIds],
+  );
+  const go = useCallback((r) => {
     setRoute(r);
     window.scrollTo({ top: 0 });
     if (!HASH_ROUTES.has(r) && location.hash) history.replaceState(null, "", location.pathname);
-  };
+  }, []);
 
   const onAuth = (u) => { setUser(u); setRoute("account"); toast("ברוכה הבאה, " + u.name + " 🌸"); };
   const logout = () => { setUser(null); go("home"); toast("התנתקת בהצלחה"); };

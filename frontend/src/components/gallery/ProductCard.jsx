@@ -1,9 +1,15 @@
+import { memo } from "react";
 import { Img } from "../ui/Img.jsx";
 import { COLORS, FONTS } from "../../constants/theme.js";
 
 /* Product card: 3:4 image, hover zoom, glassy favorite toggle and a
-   pending-approval flag for account/admin views. */
-export function ProductCard({ d, fav, onFav, onOpen }) {
+   pending-approval flag for account/admin views.
+
+   Memoized because this is the highest-count component on screen — one per
+   listing — and it previously re-rendered on every App state change,
+   including each keystroke in the search filter. Its props are now stable:
+   `onFav`/`onOpen` are useCallback'd in App.jsx and `fav` is a boolean. */
+function ProductCardBase({ d, fav, onFav, onOpen }) {
   return (
     <article onClick={() => onOpen(d)} className="group cursor-pointer rounded-none" style={{ background: "rgba(110,44,44,0.08)", borderRadius: 0 }}>
       {/* Image — dominant element, subtle hover zoom */}
@@ -83,3 +89,5 @@ export function ProductCard({ d, fav, onFav, onOpen }) {
     </article>
   );
 }
+
+export const ProductCard = memo(ProductCardBase);
