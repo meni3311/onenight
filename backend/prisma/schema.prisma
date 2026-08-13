@@ -1,7 +1,9 @@
 // Prisma schema for the onenight dress-rental marketplace.
-// Database: Supabase (PostgreSQL).
-//   DATABASE_URL  — pooled connection (PgBouncer, port 6543) used at runtime
-//   DIRECT_URL    — direct connection (port 5432) used for migrations
+// Database: Neon (PostgreSQL), EU region.
+//   DATABASE_URL  — pooled connection (the `-pooler` host) used at runtime
+//   DIRECT_URL    — direct connection (same host without `-pooler`), used for
+//                   migrations, which need a session Postgres can't give you
+//                   through a transaction pooler
 generator client {
   provider = "prisma-client-js"
   // relationJoins lets a read pass `relationLoadStrategy: "join"`, which loads
@@ -11,9 +13,10 @@ generator client {
   // Every dress read includes two relations (images, availability — see
   // CLIENT_INCLUDE), so the default strategy costs three round trips where one
   // would do. That is irrelevant against a local database and dominant against
-  // a remote one: measured against the Supabase instance in ap-southeast-2, a
-  // single round trip is ~1.8s, and endpoint latency tracks the number of
-  // queries almost exactly.
+  // a distant one: on the old ap-southeast-2 instance a single round trip cost
+  // ~1.8s and endpoint latency tracked the number of queries almost exactly.
+  // The move to an EU region cut the per-trip cost, which makes this less
+  // dramatic but no less correct — one query still beats three.
   //
   // Preview feature in Prisma 5 — `npx prisma generate` must be re-run after
   // changing this line, or the client won't accept the option.
