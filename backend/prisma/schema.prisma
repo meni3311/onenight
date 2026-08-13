@@ -114,6 +114,15 @@ model Dress {
   @@index([ownerId])
   @@index([dressLength])
   @@index([sleeveLength])
+  // These two existed in the database from
+  // 20260810180000_dress_flow_real_persistence, which created them in raw
+  // SQL, but were never declared here. That drift went unnoticed until a
+  // later `migrate dev` diffed the two and generated a migration to drop
+  // them. Declaring them makes the schema the source of truth and keeps the
+  // indexes: `region` in particular is the facet server-side browse
+  // filtering would key on, and `email` backs listing-ownership lookups.
+  @@index([email])
+  @@index([region])
 }
 
 model DressSize {

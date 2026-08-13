@@ -2,6 +2,17 @@
    onenight — luxury dress rental · full design system
    ============================================================ */
 
+/* Tailwind, built by PostCSS (see postcss.config.js + tailwind.config.js).
+   These three directives replace the cdn.tailwindcss.com <script> that used
+   to sit in index.html and generate classes in the browser on every load.
+
+   They must stay at the top of this file: `base` is Tailwind's preflight
+   reset, and everything below is written expecting that reset to have
+   already applied — the same cascade order the CDN produced. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* ---------- Tokens ---------- */
 :root {
   /* ── onenight luxury token system (wine-red signature) ── */

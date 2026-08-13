@@ -2,7 +2,7 @@
    Root App — onenight dress rental marketplace (Hebrew RTL).
    Owns routing + shared state; delegates rendering to pages.
    ============================================================ */
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
 import { api } from "./lib/api.js";
 import { purgeLegacyDressStorage } from "./lib/data.js";
 import { useLocalStorage } from "./hooks/useLocalStorage.js";
@@ -12,15 +12,33 @@ import { SiteHeader } from "./components/layout/SiteHeader.jsx";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import { Footer } from "./components/layout/Footer.jsx";
 import { Toast } from "./components/ui/Toast.jsx";
-import ProductPage from "./pages/ProductPage.jsx";
 import HomePage from "./pages/HomePage.jsx";
-import FavoritesPage from "./pages/FavoritesPage.jsx";
-import PublishPage from "./pages/PublishPage.jsx";
-import ThankYou from "./pages/ThankYou.jsx";
-import AuthPage from "./pages/AuthPage.jsx";
-import AccountPage from "./pages/AccountPage.jsx";
-import AdminPage from "./pages/AdminPage.jsx";
-import TermsPage from "./pages/TermsPage.jsx";
+
+/* Route-level code splitting. HomePage stays in the initial chunk because
+   it *is* the first paint; every other route is fetched on demand.
+   The two that matter most for bundle size pull heavy transitive deps
+   along with them: AccountPage owns DressAvailabilityCalendar, which drags
+   in react-day-picker + date-fns, and AdminPage owns AdminPhotosPanel.
+   Neither is reachable without a deliberate click, so neither belongs in
+   the bundle every first-time visitor downloads. */
+const ProductPage = lazy(() => import("./pages/ProductPage.jsx"));
+const FavoritesPage = lazy(() => import("./pages/FavoritesPage.jsx"));
+const PublishPage = lazy(() => import("./pages/PublishPage.jsx"));
+const ThankYou = lazy(() => import("./pages/ThankYou.jsx"));
+const AuthPage = lazy(() => import("./pages/AuthPage.jsx"));
+const AccountPage = lazy(() => import("./pages/AccountPage.jsx"));
+const AdminPage = lazy(() => import("./pages/AdminPage.jsx"));
+const TermsPage = lazy(() => import("./pages/TermsPage.jsx"));
+
+/* Reuses the existing .empty / .page styling rather than introducing a new
+   loading treatment, so a chunk fetch looks like the rest of the app. */
+function RouteFallback() {
+  return (
+    <div className="container page pt-[50px]">
+      <div className="empty">טוען…</div>
+    </div>
+  );
+}
 
 /* Routes reachable via a real URL hash (bookmarkable / open-in-new-tab),
    same pattern the admin panel already uses (see README: /#admin). The
@@ -122,6 +140,20 @@ export default function App() {
     purgeLegacyDressStorage();
     reloadDresses();
   }, []);
+
+  /* Warm the ProductPage chunk once the browser is idle. It's lazy so it
+     stays off the critical path, but opening a dress is the single most
+     likely next action from the homepage — without this, the first card
+     click would pay a network round-trip before the modal appears. */
+  useEffect(() => {
+    const warm = () => import("./pages/ProductPage.jsx");
+    if ("requestIdleCallback" in window) {
+      const id = requestIdleCallback(warm);
+      return () => cancelIdleCallback(id);
+    }
+    const t = setTimeout(warm, 2000);
+    return () => clearTimeout(t);
+  }, []);
   useEffect(() => {
     const h = () => { const hr = routeFromHash(); if (HASH_ROUTES.has(hr)) setRoute(hr); };
     window.addEventListener("hashchange", h);
@@ -141,14 +173,20 @@ export default function App() {
     return () => el.classList.remove("hide-viewport-scrollbar");
   }, [route]);
 
-  const dressById = (id) => dresses.find((d) => d.id === id);
-  const toggleFav = (id) =>
-    setFavIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
-  const go = (r) => {
+  /* These three are passed down through the whole tree, so a fresh identity
+     on every render defeats React.memo on anything below them (notably
+     ProductCard, which is on screen once per listing). setFavIds/setRoute
+     are useState setters and stable, so the dependency lists are honest. */
+  const dressById = useCallback((id) => dresses.find((d) => d.id === id), [dresses]);
+  const toggleFav = useCallback(
+    (id) => setFavIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id])),
+    [setFavIds],
+  );
+  const go = useCallback((r) => {
     setRoute(r);
     window.scrollTo({ top: 0 });
     if (!HASH_ROUTES.has(r) && location.hash) history.replaceState(null, "", location.pathname);
-  };
+  }, []);
 
   const onAuth = (u) => { setUser(u); setRoute("account"); toast("ברוכה הבאה, " + u.name + " 🌸"); };
   const logout = () => { setUser(null); go("home"); toast("התנתקת בהצלחה"); };
@@ -229,37 +267,44 @@ export default function App() {
         />
       )}
 
-      {route === "publish" && <PublishRoute onSubmit={publish} goHome={() => go("home")} />}
-      {route === "thankyou" && <ThankYou goHome={() => go("home")} />}
-      {route === "terms" && <TermsPage goHome={() => go("home")} />}
+      <Suspense fallback={<RouteFallback />}>
+        {route === "publish" && <PublishRoute onSubmit={publish} goHome={() => go("home")} />}
+        {route === "thankyou" && <ThankYou goHome={() => go("home")} />}
+        {route === "terms" && <TermsPage goHome={() => go("home")} />}
 
-      {route === "favorites" && (
-        <FavoritesPage dresses={favDresses} favIds={favIds} onFav={toggleFav} onOpen={setSelected} go={go} />
-      )}
+        {route === "favorites" && (
+          <FavoritesPage dresses={favDresses} favIds={favIds} onFav={toggleFav} onOpen={setSelected} go={go} />
+        )}
 
-      {route === "login" && (
-        <AuthPage mode={authMode} onAuth={onAuth} goHome={() => go("home")} toast={toast} />
-      )}
+        {route === "login" && (
+          <AuthPage mode={authMode} onAuth={onAuth} goHome={() => go("home")} toast={toast} />
+        )}
 
-      {route === "account" && (
-        <AccountRoute
-          user={user}
-          setUser={setUser}
-          dresses={dresses}
-          setDresses={setDresses}
-          favIds={favIds}
-          dressById={dressById}
-          onOpen={setSelected}
-          onFav={toggleFav}
-          toast={toast}
-          initialTab={accountTab}
-        />
-      )}
+        {route === "account" && (
+          <AccountRoute
+            user={user}
+            setUser={setUser}
+            dresses={dresses}
+            setDresses={setDresses}
+            favIds={favIds}
+            dressById={dressById}
+            onOpen={setSelected}
+            onFav={toggleFav}
+            toast={toast}
+            initialTab={accountTab}
+          />
+        )}
 
-      {route === "admin" && (
-        <AdminPage dresses={dresses} setDresses={setDresses} toast={toast} dressById={dressById} onOpen={setSelected} />
-      )}
+        {route === "admin" && (
+          <AdminPage dresses={dresses} setDresses={setDresses} toast={toast} dressById={dressById} onOpen={setSelected} />
+        )}
+      </Suspense>
 
+      {/* Separate boundary, and deliberately `null`: this is a full-screen
+          overlay, so a centred "loading" card behind it would flash in the
+          page body. The idle prefetch above means the chunk is normally
+          already warm by the time a card is clicked. */}
+      <Suspense fallback={null}>
       {selected && (
         <ProductPage
           d={selected}
@@ -271,6 +316,7 @@ export default function App() {
           onOpenSimilar={(dr) => { setSelected(dr); window.scrollTo({ top: 0 }); }}
         />
       )}
+      </Suspense>
 
       <Footer go={go} toast={toast} />
 

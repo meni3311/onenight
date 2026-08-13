@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { motion } from "framer-motion";
 import { ProductCard } from "./ProductCard.jsx";
 
@@ -14,6 +15,12 @@ const PAIR_STAGGER = 0.15;
 /* Responsive product grid (4 / 3 / 2 columns) with a staggered reveal,
    plus an empty state that can prompt the user to publish. */
 export function ProductGrid({ dresses, favIds, onFav, onOpen, emptyAction }) {
+  /* favIds stays an array in the props API (callers are unchanged), but the
+     per-card lookup was `favIds.includes(...)` inside the map — O(n²) across
+     the grid. Must be declared before the early return below, or the hook
+     order would change between the empty and non-empty renders. */
+  const favSet = useMemo(() => new Set(favIds), [favIds]);
+
   if (!dresses.length) {
     return (
       <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4 rounded-sm border border-dashed border-line py-16 text-center">
@@ -41,7 +48,17 @@ export function ProductGrid({ dresses, favIds, onFav, onOpen, emptyAction }) {
           viewport={cardReveal.viewport}
           transition={{ duration: 0.4, ease: "easeOut", delay: Math.floor(i / 2) * PAIR_STAGGER }}
         >
-          <ProductCard d={d} fav={favIds.includes(d.id)} onFav={onFav} onOpen={onOpen} />
+          {/* The grid is at most 4 columns (xl), so the first four cards are
+              the only ones that can be above the fold on any breakpoint.
+              One of them is the LCP element on the homepage — they load
+              eagerly, everything below stays lazy. */}
+          <ProductCard
+            d={d}
+            fav={favSet.has(d.id)}
+            onFav={onFav}
+            onOpen={onOpen}
+            priority={i < 4}
+          />
         </motion.div>
       ))}
     </div>

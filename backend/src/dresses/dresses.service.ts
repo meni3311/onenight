@@ -90,6 +90,17 @@ type DressWithRelations = Prisma.DressGetPayload<{ include: typeof CLIENT_INCLUD
  */
 export const MAX_GALLERY_IMAGES = 8;
 
+/**
+ * How long a cached anonymous browse list may be served for.
+ *
+ * Short on purpose. Every write path calls invalidateBrowseCache(), so this
+ * is the backstop rather than the mechanism — the cost of it expiring late
+ * is a new listing appearing up to a minute after publication, which is
+ * harmless. Raising it only makes sense once the invalidation set has been
+ * observed to be complete in production.
+ */
+const BROWSE_CACHE_TTL_MS = 60_000;
+
 /** `Date` -> "YYYY-MM-DD", in UTC so a day never shifts across timezones. */
 function toDateKey(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -113,6 +124,17 @@ export class DressesService {
     private readonly aiPhoto: AiPhotoService,
     private readonly storage: StorageService,
   ) {}
+
+  /**
+   * The one cached read in this service: the anonymous `status=approved`
+   * browse list. A single field rather than a cache library — there is
+   * exactly one key, and the invalidation below is hand-written either way.
+   *
+   * This is per-process. If the API is ever scaled past one instance each
+   * one keeps its own copy and a write on instance A won't clear instance
+   * B — that, not traffic volume, is the signal to move to a shared store.
+   */
+  private browseCache: { data: ClientDress[]; expiresAt: number } | null = null;
 
   private toClient(d: DressWithRelations): ClientDress {
     return {
@@ -153,18 +175,48 @@ export class DressesService {
    * Browse list. `status` is "approved" (default), a specific status, or
    * "all" for the admin queue and the owner's own listings — which include
    * pending and rejected ones.
+   *
+   * Only the plain `approved` list is cached. Everything else is served
+   * live: `all` is the admin queue and an owner's own listings, where a
+   * moderation decision has to be visible immediately.
    */
   async listDresses(status = 'approved'): Promise<ClientDress[]> {
+    const cacheable = status === 'approved';
+    if (cacheable) {
+      const hit = this.browseCache;
+      if (hit && hit.expiresAt > Date.now()) return hit.data;
+    }
+
     try {
       const dresses = await this.prisma.dress.findMany({
         where: status === 'all' ? {} : { status },
         orderBy: { createdAt: 'desc' },
         include: CLIENT_INCLUDE,
       });
-      return dresses.map((d) => this.toClient(d));
+      const result = dresses.map((d) => this.toClient(d));
+      if (cacheable) {
+        this.browseCache = {
+          data: result,
+          expiresAt: Date.now() + BROWSE_CACHE_TTL_MS,
+        };
+      }
+      return result;
     } catch {
       throw new InternalServerErrorException('Failed to load dresses');
     }
+  }
+
+  /**
+   * Drops the cached browse list. Called from every path that changes what
+   * that list would return — including toggleBookedDate, because a dress
+   * payload embeds `booked` (see toClient) and the frontend reads a dress's
+   * availability straight out of the browse response. Missing an
+   * invalidation here would mean showing a taken date as free, so the rule
+   * is simple and deliberately blunt: any write to a dress, its images, its
+   * status or its availability clears the whole entry.
+   */
+  private invalidateBrowseCache(): void {
+    this.browseCache = null;
   }
 
   async getDressById(id: string): Promise<ClientDress> {
@@ -207,6 +259,7 @@ export class DressesService {
       },
       include: CLIENT_INCLUDE,
     });
+    this.invalidateBrowseCache();
     return this.toClient(created);
   }
 
@@ -252,6 +305,7 @@ export class DressesService {
         include: CLIENT_INCLUDE,
       });
     });
+    this.invalidateBrowseCache();
     return this.toClient(updated);
   }
 
@@ -266,6 +320,7 @@ export class DressesService {
       },
       include: CLIENT_INCLUDE,
     });
+    this.invalidateBrowseCache();
     return this.toClient(updated);
   }
 
@@ -293,6 +348,7 @@ export class DressesService {
         data: { dressId: id, date, status: 'unavailable' },
       });
     }
+    this.invalidateBrowseCache();
     return this.getDressById(id);
   }
 
@@ -420,6 +476,7 @@ export class DressesService {
       });
     }
 
+    this.invalidateBrowseCache();
     return results;
   }
 
@@ -478,6 +535,7 @@ export class DressesService {
     await Promise.all(dress.images.map((img) => this.storage.deleteByPublicUrl(img.url)));
 
     await this.prisma.dress.delete({ where: { id } });
+    this.invalidateBrowseCache();
   }
 
   /**
@@ -501,6 +559,7 @@ export class DressesService {
       ),
     );
     await this.prisma.dress.deleteMany({ where: { ownerId } });
+    this.invalidateBrowseCache();
   }
 
   /**
@@ -542,6 +601,7 @@ export class DressesService {
       ),
     ]);
 
+    this.invalidateBrowseCache();
     return this.getDressById(dressId);
   }
 
@@ -574,6 +634,7 @@ export class DressesService {
     await this.prisma.dressImage.create({
       data: { dressId, url, order: (last?.order ?? -1) + 1 },
     });
+    this.invalidateBrowseCache();
     return this.getDressById(dressId);
   }
 

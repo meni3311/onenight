@@ -51,13 +51,22 @@ const DEFAULT_MODEL = 'product-to-model';
  *
  * The cream-white backdrop is specified by hex so generations sit against the
  * same tone as the site's own surfaces rather than a generic studio grey.
- * Note the model is asked for explicitly (a woman, facing camera, full body):
- * left unsaid, the endpoint varies pose and framing between runs, which reads
- * as inconsistency across a grid of listing cards.
+ *
+ * Subject and framing are still pinned (a woman, full body), because leaving
+ * those unsaid lets the endpoint change crop between runs and a grid of cards
+ * with inconsistent framing reads as broken. Pose is deliberately *not*
+ * pinned: it asks for a natural asymmetric stance — weight on one leg, a
+ * slight turn, hands resting rather than held — because a straight-on
+ * symmetrical pose reads as a mannequin shot and flattens how a dress hangs.
+ * Consistency across the catalog comes from the fixed backdrop, lighting and
+ * framing, which is where it actually matters; varying the pose is what makes
+ * the results look photographed rather than generated.
  */
 const DEFAULT_STUDIO_PROMPT =
   'Full-body professional fashion photograph of a woman wearing the garment, ' +
-  'standing straight facing the camera in a simple elegant pose. ' +
+  'in a natural relaxed pose with her weight shifted onto one leg, body turned ' +
+  'at a slight angle to the camera, hands and arms resting naturally rather ' +
+  'than held symmetrically. ' +
   'Plain seamless studio backdrop, warm cream-white tone similar to hex #FAF6F1, ' +
   'no visible floor line or seam, no shadows or texture on the background. ' +
   'Soft diffused even studio lighting from the front, no harsh shadows. ' +
