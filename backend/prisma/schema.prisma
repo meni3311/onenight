@@ -123,6 +123,12 @@ model Dress {
   // filtering would key on, and `email` backs listing-ownership lookups.
   @@index([email])
   @@index([region])
+  // Backs the paginated browse query, which is always `WHERE status = ?
+  // ORDER BY createdAt DESC` with an OFFSET. Composite and in that order on
+  // purpose: status is the equality predicate, so it has to come first for
+  // createdAt to still serve the sort — a plain @@index([status]) would
+  // filter but leave a sort of the whole matching set on every page.
+  @@index([status, createdAt])
 }
 
 model DressSize {

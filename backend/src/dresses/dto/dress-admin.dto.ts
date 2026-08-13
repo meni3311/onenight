@@ -1,5 +1,38 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
+import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './browse-dresses.dto';
+
+/**
+ * Query for GET /api/admin/dresses — the moderation queue.
+ *
+ * `status` is the one param the public browse endpoint deliberately no longer
+ * honours. It lives here instead, on a controller that carries AdminGuard at
+ * the class level.
+ */
+export class AdminListDressesDto {
+  @ApiPropertyOptional({
+    enum: ['pending', 'approved', 'rejected', 'all'],
+    default: 'pending',
+  })
+  @IsOptional()
+  @IsIn(['pending', 'approved', 'rejected', 'all'])
+  status?: string;
+
+  @ApiPropertyOptional({ minimum: 1, default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: MAX_PAGE_LIMIT, default: DEFAULT_PAGE_LIMIT })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  limit?: number;
+}
 
 /** Body for PATCH /dresses/:id/status — admin approve/reject. */
 export class UpdateDressStatusDto {

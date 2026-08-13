@@ -46,8 +46,12 @@ Registration asks for an SMS code — for the demo, enter **1234**. The account 
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/dresses` | List approved dresses (`?status=all\|pending\|approved\|rejected`) |
-| GET | `/api/dresses/:id` | One dress |
+| GET | `/api/dresses` | Browse **approved** dresses — paginated and filtered server-side (`?page=&limit=&sort=&colors=&sizes=&regions=&dressLengths=&sleeveLengths=&minPrice=&maxPrice=&source=&q=`). Returns `{ items, total, page, limit }`, without owner contact details. There is no parameter that reaches a pending or rejected listing |
+| GET | `/api/dresses/by-ids` | Approved dresses by id, in the order asked for (`?ids=a,b,c`) — backs the favourites page |
+| GET | `/api/dresses/mine` | An owner's own listings at every status (`?email=`) |
+| GET | `/api/dresses/:id` | One dress, contact details included |
+| GET | `/api/dresses/:id/similar` | Approved dresses sharing this one's colour or source |
+| GET | `/api/admin/dresses` | **Admin** moderation queue (`?status=pending\|approved\|rejected\|all`, paginated, with per-status counts; `x-admin-password` header) |
 | POST | `/api/dresses` | Publish a dress (lands as `pending`) |
 | PATCH | `/api/dresses/:id` | Edit listing fields |
 | PATCH | `/api/dresses/:id/booked` | Toggle an availability date (`{ "key": "2026-07-01" }`) |
@@ -64,3 +68,4 @@ Registration asks for an SMS code — for the demo, enter **1234**. The account 
 - Email notifications and SMS verification are mocked (logged to the browser console). Wire up a real provider (Resend, Twilio) where marked `TODO`.
 - Images are stored inline (base64 / URLs). For production, upload to object storage and keep only the URL.
 - The admin gate is a shared password — replace with real auth (JWT/sessions) before going live.
+- Listing ownership is an email match (`/api/dresses/mine`, listing deletion), because there is no session to check. Anyone who knows an address can read that person's listings. This is the same reason the admin gate is temporary, and both go away together when real auth lands.

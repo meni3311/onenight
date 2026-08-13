@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { REGIONS, SIZES, CONDITIONS, placeholder } from "../lib/data.js";
-import { api, deleteDress, getDressInquiryCount, sendOtp, deleteAccount } from "../lib/api.js";
+import { api, deleteDress, getDressInquiryCount, getMyDresses, sendOtp, deleteAccount } from "../lib/api.js";
 import { DressAvailabilityCalendar } from "../components/calendar/DressAvailabilityCalendar.jsx";
 import { ConfirmModal } from "../components/ui/ConfirmModal.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -30,9 +30,16 @@ const TABS = [["ads", "המודעות שלי"], ["account", "פרטי חשבון
    flow, availability calendar included) and editable account details.
    Favorites live on their own page, reached via "המועדפים שלי" in the
    personal-area dropdown — not a tab here. */
-export default function AccountPage({ user, dresses, setDresses, onOpen, setUser, toast, initialTab }) {
+export default function AccountPage({ user, onOpen, setUser, toast, initialTab }) {
   const { requestPublish, logout } = useAuth();
   const [tab, setTab] = useState(initialTab || "ads");
+  /* This page owns its listings now. It used to filter the app-wide browse
+     array by email, which worked only because that array was the entire
+     database — every dress at every status, sent to every visitor. The
+     browse list is one page of approved listings, so "my listings"
+     (pending and rejected very much included) has to be its own request. */
+  const [dresses, setDresses] = useState([]);
+  const [adsLoading, setAdsLoading] = useState(true);
   const [editing, setEditing] = useState(null);
   /* Delete confirmation. `deleting` holds the dress awaiting confirmation;
      `deleteInquiries` is how many booking requests point at it — null while
@@ -61,9 +68,22 @@ export default function AccountPage({ user, dresses, setDresses, onOpen, setUser
      flow), not phone — the OTP flow never collects a phone number, so
      phone-based matching left every account's listings empty. */
   const myEmail = (user.email || "").trim().toLowerCase();
-  const myAds = myEmail
-    ? dresses.filter((d) => (d.email || "").trim().toLowerCase() === myEmail)
-    : [];
+
+  useEffect(() => {
+    if (!myEmail) { setDresses([]); setAdsLoading(false); return; }
+    let cancelled = false;
+    setAdsLoading(true);
+    getMyDresses(myEmail)
+      .then((rows) => { if (!cancelled) setDresses(rows || []); })
+      .catch((e) => { if (!cancelled) toast("טעינת המודעות שלך נכשלה: " + e.message); })
+      .finally(() => { if (!cancelled) setAdsLoading(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myEmail]);
+
+  /* The server already scoped this to the owner, so no second filter here —
+     the name stays because the rest of the page reads it. */
+  const myAds = dresses;
 
   const saveEdit = async () => {
     try {
@@ -164,7 +184,9 @@ export default function AccountPage({ user, dresses, setDresses, onOpen, setUser
         ))}
       </div>
 
-      {tab === "ads" && (myAds.length ? myAds.map((d) => (
+      {tab === "ads" && adsLoading && <div className="empty">טוען את המודעות שלך…</div>}
+
+      {tab === "ads" && !adsLoading && (myAds.length ? myAds.map((d) => (
         <div key={d.id} className="admin-row owner-row">
           <img src={d.images[0]} alt="" onError={(e) => (e.target.src = placeholder(d.colorHex, d.title))} />
           <div className="flex-1 min-w-0">

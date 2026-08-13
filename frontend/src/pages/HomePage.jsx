@@ -7,17 +7,21 @@ import { ProductGrid } from "../components/gallery/ProductGrid.jsx";
 import { PublishPromoPopup } from "../components/ui/PublishPromoPopup.jsx";
 
 /* Landing page: hero, brand sections, then the filterable dress gallery.
-   `allDresses` is the full, unfiltered listings array (as opposed to
-   `dresses`, which is already search/filter/sort-narrowed) — the promo
-   popup's "does this account already have a listing" check needs the
-   complete set, not whatever the visitor currently has filtered. */
-export default function HomePage({ go, filters, setFilters, sort, setSort, loading, dresses, allDresses, favIds, onFav, onOpen }) {
+
+   `dresses` is one server-filtered page, not the catalogue — `total` is how
+   many match the current filters overall, which is what the filter panel's
+   result count reports and what "load more" measures itself against. */
+export default function HomePage({
+  go, filters, setFilters, sort, setSort, loading,
+  dresses, total, hasMore, loadingMore, onLoadMore,
+  favIds, onFav, onOpen,
+}) {
   const scrollToBrowse = () =>
     document.getElementById("browse")?.scrollIntoView({ behavior: "smooth" });
 
   return (
     <>
-      <PublishPromoPopup dresses={allDresses} />
+      <PublishPromoPopup />
 
       <Hero onPublish={() => go("publish")} onBrowse={scrollToBrowse} />
 
@@ -27,7 +31,10 @@ export default function HomePage({ go, filters, setFilters, sort, setSort, loadi
 
       <section id="browse" className="mx-auto max-w-[1280px] px-3 pb-28 pt-14">
         <div className="flex gap-10">
-          <FilterSidebar f={filters} setF={setFilters} resultCount={dresses.length}>
+          {/* The count is the server's `total`, not how many cards are on
+              screen — the panel is telling the visitor how many dresses match
+              their filters, and only the first page of those is loaded. */}
+          <FilterSidebar f={filters} setF={setFilters} resultCount={total}>
             <SortMenu sort={sort} setSort={setSort} />
           </FilterSidebar>
 
@@ -37,13 +44,28 @@ export default function HomePage({ go, filters, setFilters, sort, setSort, loadi
                 טוען שמלות…
               </div>
             ) : (
-              <ProductGrid
-                dresses={dresses}
-                favIds={favIds}
-                onFav={onFav}
-                onOpen={onOpen}
-                emptyAction={() => go("publish")}
-              />
+              <>
+                <ProductGrid
+                  dresses={dresses}
+                  favIds={favIds}
+                  onFav={onFav}
+                  onOpen={onOpen}
+                  emptyAction={() => go("publish")}
+                />
+
+                {hasMore && (
+                  <div className="mt-10 flex justify-center">
+                    <button
+                      type="button"
+                      onClick={onLoadMore}
+                      disabled={loadingMore}
+                      className="rounded-sm border border-line px-9 py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-ink transition-colors hover:bg-brand hover:text-white disabled:opacity-60"
+                    >
+                      {loadingMore ? "טוען…" : `עוד שמלות (${total - dresses.length})`}
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
