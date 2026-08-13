@@ -4,6 +4,20 @@
 //   DIRECT_URL    — direct connection (port 5432) used for migrations
 generator client {
   provider = "prisma-client-js"
+  // relationJoins lets a read pass `relationLoadStrategy: "join"`, which loads
+  // `include`d relations with a LATERAL join in the same statement instead of
+  // issuing one follow-up query per relation.
+  //
+  // Every dress read includes two relations (images, availability — see
+  // CLIENT_INCLUDE), so the default strategy costs three round trips where one
+  // would do. That is irrelevant against a local database and dominant against
+  // a remote one: measured against the Supabase instance in ap-southeast-2, a
+  // single round trip is ~1.8s, and endpoint latency tracks the number of
+  // queries almost exactly.
+  //
+  // Preview feature in Prisma 5 — `npx prisma generate` must be re-run after
+  // changing this line, or the client won't accept the option.
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {

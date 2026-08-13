@@ -8,6 +8,9 @@ import { AuthOtpModule } from './auth-otp/auth-otp.module';
 import { BookingInquiriesModule } from './booking-inquiries/booking-inquiries.module';
 import { AdminController } from './common/admin.controller';
 import { HealthController } from './common/health.controller';
+// TEMPORARY — remove together with the controller once database latency is
+// understood. See db-diagnostics.controller.ts.
+import { DbDiagnosticsController } from './common/db-diagnostics.controller';
 
 @Module({
   imports: [
@@ -27,6 +30,6 @@ import { HealthController } from './common/health.controller';
   ],
   // Standalone controllers with no service/module of their own: the admin
   // password check and the health probe.
-  controllers: [AdminController, HealthController],
+  controllers: [AdminController, HealthController, DbDiagnosticsController],
 })
 export class AppModule {}

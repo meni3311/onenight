@@ -110,6 +110,25 @@ const CLIENT_INCLUDE = {
 type DressWithRelations = Prisma.DressGetPayload<{ include: typeof CLIENT_INCLUDE }>;
 
 /**
+ * Load CLIENT_INCLUDE's relations with a LATERAL join in the same statement,
+ * instead of Prisma's default of one follow-up query per relation.
+ *
+ * Every dress read includes two relations, so the default costs three round
+ * trips where one does. Against a local database that's free; against the
+ * Supabase instance in ap-southeast-2 a single round trip measured ~1.8s, and
+ * endpoint latency tracked query count almost exactly — the browse list at
+ * ~4.7s was three tolls, not one slow query.
+ *
+ * Reads only. `relationLoadStrategy` is not accepted on create/update, so the
+ * write paths below keep the default and pay the extra trips on a response
+ * nobody is waiting on a grid for.
+ *
+ * Requires the `relationJoins` preview feature (see schema.prisma) and a
+ * `prisma generate` after enabling it.
+ */
+const JOIN = { relationLoadStrategy: 'join' } as const;
+
+/**
  * Ceiling on photos per listing, enforced when the admin adds one.
  *
  * Matches the `max` passed to ImageUploader on the admin screen. The publish
@@ -342,6 +361,7 @@ export class DressesService {
       // never optional and shouldn't cost a second request.
       const [rows, total] = await this.prisma.$transaction([
         this.prisma.dress.findMany({
+          ...JOIN,
           where,
           orderBy: this.browseOrderBy(query.sort),
           skip: (page - 1) * limit,
@@ -383,6 +403,7 @@ export class DressesService {
   async listPublicByIds(ids: string[]): Promise<PublicDress[]> {
     if (!ids.length) return [];
     const rows = await this.prisma.dress.findMany({
+      ...JOIN,
       where: { id: { in: ids }, status: 'approved' },
       include: CLIENT_INCLUDE,
     });
@@ -411,6 +432,7 @@ export class DressesService {
     const normalized = (email || '').trim().toLowerCase();
     if (!normalized) return [];
     const rows = await this.prisma.dress.findMany({
+      ...JOIN,
       where: { email: normalized },
       orderBy: { createdAt: 'desc' },
       take: 100,
@@ -443,6 +465,7 @@ export class DressesService {
     const [[rows, total], grouped] = await Promise.all([
       this.prisma.$transaction([
         this.prisma.dress.findMany({
+          ...JOIN,
           where,
           orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
           skip: (page - 1) * take,
@@ -477,6 +500,7 @@ export class DressesService {
 
   async getDressById(id: string): Promise<ClientDress> {
     const dress = await this.prisma.dress.findUnique({
+      ...JOIN,
       where: { id },
       include: CLIENT_INCLUDE,
     });
@@ -915,6 +939,7 @@ export class DressesService {
     if (current.color !== null) or.push({ color: current.color });
 
     const similar = await this.prisma.dress.findMany({
+      ...JOIN,
       where: { id: { not: id }, status: 'approved', OR: or },
       take: limit,
       orderBy: { createdAt: 'desc' },
