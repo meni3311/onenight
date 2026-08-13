@@ -5,6 +5,9 @@ import {
   Logger,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+// sharp uses `export =`, so the instance type has to be pulled in by name
+// rather than reached through a `sharp.` namespace on the default import.
+import sharp, { type Sharp } from 'sharp';
 
 /**
  * Uploads listing photos to Supabase Storage.
@@ -34,6 +37,59 @@ export interface UploadedImage {
   mimetype: string;
   size: number;
   buffer: Buffer;
+}
+
+/**
+ * Widths generated alongside every upload, matching how the images are
+ * actually displayed: the browse grid is at most 4 columns so a card is
+ * ~300px (400 covers it, 800 covers it at 2x), and 1200 covers the detail
+ * gallery. See the `sizes` attribute in frontend Img.jsx.
+ */
+const VARIANT_WIDTHS = [400, 800, 1200] as const;
+
+/** Longest edge kept for the stored "original". A 12MP phone photo has no
+ *  business being served to anyone; this is the detail view's ceiling. */
+const MAX_ORIGINAL_WIDTH = 1600;
+
+const QUALITY = 80;
+
+/**
+ * Path segment marking objects written by the resizing pipeline.
+ *
+ * The publish form uploads photos *before* the dress row exists, gets plain
+ * URL strings back, and posts those strings in createDress — so there is no
+ * channel through which "this image has variants" could be passed without
+ * changing the DTO and the upload flow. Encoding it in the path instead
+ * makes variant existence derivable from the URL alone: anything under this
+ * prefix was written with all three widths, anything else predates the
+ * pipeline and has none. That keeps one source of truth rather than a
+ * database flag that could drift from what is actually in the bucket.
+ */
+const VARIANT_PREFIX = 'v2';
+
+/** The three variant URLs for a stored image, or nulls when it predates
+ *  the resizing pipeline. */
+export interface ImageVariants {
+  url400: string | null;
+  url800: string | null;
+  url1200: string | null;
+}
+
+const NO_VARIANTS: ImageVariants = { url400: null, url800: null, url1200: null };
+
+/**
+ * `.../v2/<dress>/<uuid>.jpg` + 400 -> `.../v2/<dress>/<uuid>_400.jpg`
+ *
+ * The extension is searched for only within the last path segment. Scanning
+ * the whole URL would find the dot in the *hostname* for an extension-less
+ * path and splice the width into the domain.
+ */
+function withWidthSuffix(url: string, width: number): string {
+  const slash = url.lastIndexOf('/');
+  const dot = url.indexOf('.', slash + 1);
+  return dot === -1
+    ? `${url}_${width}`
+    : `${url.slice(0, dot)}_${width}${url.slice(dot)}`;
 }
 
 @Injectable()
@@ -180,14 +236,98 @@ export class StorageService {
     return path || null;
   }
 
-  /** Shared write path for both upload entry points. */
+  /**
+   * The variant URLs for a stored image, derived from its path.
+   *
+   * Returns nulls for anything not written by the resizing pipeline, so a
+   * pre-pipeline photo reports "no variants" rather than pointing a srcset
+   * at objects that were never created.
+   */
+  variantsFor(url: string): ImageVariants {
+    const marker = `/storage/v1/object/public/${BUCKET}/${VARIANT_PREFIX}/`;
+    if (!url || !url.includes(marker)) return { ...NO_VARIANTS };
+    return {
+      url400: withWidthSuffix(url, 400),
+      url800: withWidthSuffix(url, 800),
+      url1200: withWidthSuffix(url, 1200),
+    };
+  }
+
+  /**
+   * Shared write path for both upload entry points.
+   *
+   * Re-encodes the original down to MAX_ORIGINAL_WIDTH and writes three
+   * narrower variants beside it. `withoutEnlargement` means a small source
+   * is never upscaled — the variant object still exists, it's just capped at
+   * the source's own width, which keeps "under the v2 prefix => all three
+   * widths exist" true without wasting bytes on fake resolution.
+   *
+   * If sharp can't process the bytes at all, the upload still succeeds: the
+   * original is written unmodified at the *legacy* path (no v2 prefix), so
+   * variantsFor() correctly reports none. A listing photo that can't be
+   * resized is worth more than a failed publish.
+   */
   private async put(
     buffer: Buffer,
     mimetype: string,
     ext: string,
     dressId: string,
   ): Promise<string> {
-    const objectPath = `${dressId}/${randomUUID()}.${ext}`;
+    const id = randomUUID();
+
+    let main = buffer;
+    let variants: { width: number; body: Buffer }[] = [];
+    let resized = true;
+    try {
+      const pipeline = () => sharp(buffer).rotate(); // rotate() honours EXIF
+      main = await this.encode(pipeline().resize({
+        width: MAX_ORIGINAL_WIDTH,
+        withoutEnlargement: true,
+      }), ext);
+      variants = await Promise.all(
+        VARIANT_WIDTHS.map(async (width) => ({
+          width,
+          body: await this.encode(
+            pipeline().resize({ width, withoutEnlargement: true }),
+            ext,
+          ),
+        })),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `sharp could not process an upload for ${dressId}; storing the original unresized. ${(err as Error).message}`,
+      );
+      main = buffer;
+      variants = [];
+      resized = false;
+    }
+
+    const dir = resized ? `${VARIANT_PREFIX}/${dressId}` : dressId;
+    const objectPath = `${dir}/${id}.${ext}`;
+
+    await this.putObject(objectPath, main, mimetype);
+    // Variants are written after the original so a failure mid-way can never
+    // leave a v2-prefixed original whose variants are missing.
+    for (const v of variants) {
+      await this.putObject(`${dir}/${id}_${v.width}.${ext}`, v.body, mimetype);
+    }
+
+    return `${this.baseUrl}/storage/v1/object/public/${BUCKET}/${objectPath}`;
+  }
+
+  /** Re-encode a sharp pipeline into the same format it came in as. */
+  private encode(pipeline: Sharp, ext: string): Promise<Buffer> {
+    if (ext === 'png') return pipeline.png({ compressionLevel: 9 }).toBuffer();
+    if (ext === 'webp') return pipeline.webp({ quality: QUALITY }).toBuffer();
+    return pipeline.jpeg({ quality: QUALITY, mozjpeg: true }).toBuffer();
+  }
+
+  /** One PUT into the bucket. */
+  private async putObject(
+    objectPath: string,
+    body: Buffer,
+    mimetype: string,
+  ): Promise<void> {
     const endpoint = `${this.baseUrl}/storage/v1/object/${BUCKET}/${objectPath}`;
 
     let res: Response;
@@ -199,7 +339,7 @@ export class StorageService {
           'Content-Type': mimetype,
           'x-upsert': 'false',
         },
-        body: new Uint8Array(buffer),
+        body: new Uint8Array(body),
       });
     } catch (err) {
       this.logger.error(`Storage upload failed for ${objectPath}`, err as Error);
@@ -215,7 +355,5 @@ export class StorageService {
       // supabase/migrations/003_dress_images_bucket.sql.
       throw new InternalServerErrorException('העלאת התמונה נכשלה');
     }
-
-    return `${this.baseUrl}/storage/v1/object/public/${BUCKET}/${objectPath}`;
   }
 }

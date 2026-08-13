@@ -139,6 +139,14 @@ model DressImage {
   dressId String
   url     String
   order   Int
+  // Resized variants written by StorageService at upload time (400/800/1200
+  // wide), used to build a srcset instead of shipping the full-resolution
+  // original into a grid cell. Nullable on purpose: photos uploaded before
+  // the resizing pipeline existed have none, and the client falls back to
+  // `url` when a variant is null rather than requesting a 404.
+  url400  String?
+  url800  String?
+  url1200 String?
   // True for photos produced by the admin-only AI on-model photo tool
   // (AiPhotoService) rather than uploaded by the lister. Purely presentational
   // — it drives the "AI" badge in the admin grid so the admin can tell a
