@@ -6,8 +6,13 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { DressCategory, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  normalizeHashtags,
+  normalizeSizes,
+  resolveBridesmaidSetCount,
+} from './dress-normalize';
 import { CreateDressDto } from './dto/create-dress.dto';
 import { UpdateDressDto } from './dto/update-dress.dto';
 import { UpdateDressStatusDto } from './dto/dress-admin.dto';
@@ -59,7 +64,13 @@ export interface ClientDress {
   sleeveLength: string;
   city: string | null;
   region: string | null;
-  size: string | null;
+  /** Replaced the single `size` string; always at least one entry. */
+  sizes: string[];
+  category: DressCategory;
+  /** Non-null only when `category` is "bridesmaid". */
+  bridesmaidSetCount: number | null;
+  /** Stored bare; consumers add the leading "#" for display. */
+  hashtags: string[];
   phone: string | null;
   email: string | null;
   status: string;
@@ -221,7 +232,10 @@ export class DressesService {
       sleeveLength: d.sleeveLength,
       city: d.city,
       region: d.region,
-      size: d.size,
+      sizes: d.sizes,
+      category: d.category,
+      bridesmaidSetCount: d.bridesmaidSetCount,
+      hashtags: d.hashtags,
       phone: d.phone,
       email: d.email,
       status: d.status,
@@ -257,7 +271,12 @@ export class DressesService {
     const where: Prisma.DressWhereInput = { status: 'approved' };
 
     if (q.colors?.length) where.color = { in: q.colors };
-    if (q.sizes?.length) where.size = { in: q.sizes };
+    // `hasSome`, not `in`: `sizes` is an array column now, and a dress that
+    // fits both S and M has to appear in a search for either. `in` would be a
+    // type error here, but the intent is worth stating — ANY overlap matches,
+    // not "all the selected sizes".
+    if (q.sizes?.length) where.sizes = { hasSome: q.sizes };
+    if (q.categories?.length) where.category = { in: q.categories };
     if (q.regions?.length) where.region = { in: q.regions };
     if (q.dressLengths?.length) where.dressLength = { in: q.dressLengths };
     if (q.sleeveLengths?.length) where.sleeveLength = { in: q.sleeveLengths };
@@ -279,6 +298,17 @@ export class DressesService {
         { desc: contains },
         { color: contains },
         { region: contains },
+        // Hashtags join the text search rather than getting a filter facet of
+        // their own — that waits for the autocomplete feature.
+        //
+        // EXACT TAG MATCH, not substring, and the difference is worth knowing:
+        // Prisma's array operators (`has`) test membership, and there is no
+        // "any element contains" without dropping to raw SQL. So searching
+        // "ערב" matches the tag "ערב" but not "ערב-קיץ", while still
+        // substring-matching the four scalar fields above. The query is run
+        // through the same normalizer the tags were stored with, so a visitor
+        // typing "#Summer" finds the tag stored as "summer".
+        { hashtags: { has: normalizeHashtags([q.q])[0] ?? q.q } },
       ];
     }
 
@@ -317,12 +347,20 @@ export class DressesService {
    * non-default page size — see CACHEABLE_PAGES for why. The page-size check
    * also means a caller can't mint unlimited cache entries by walking `limit`
    * from 1 to MAX_PAGE_LIMIT.
+   *
+   * EVERY FACET buildBrowseWhere READS MUST BE LISTED IN `filtered` BELOW.
+   * This is the one place where forgetting a facet is silent and wrong rather
+   * than loud: a filter the WHERE honours but this check doesn't sees the
+   * request as unfiltered, so a category-filtered page 1 gets served — and
+   * stored as — the unfiltered page. It only misbehaves on a cache hit, which
+   * is exactly the request every visitor makes.
    */
   private browseCacheKey(q: BrowseDressesDto, page: number, limit: number): string | null {
     const filtered =
       !!q.q ||
       !!q.colors?.length ||
       !!q.sizes?.length ||
+      !!q.categories?.length ||
       !!q.regions?.length ||
       !!q.dressLengths?.length ||
       !!q.sleeveLengths?.length ||
@@ -454,9 +492,15 @@ export class DressesService {
     status: string,
     page = 1,
     limit = DEFAULT_PAGE_LIMIT,
+    category?: DressCategory,
   ): Promise<Page<ClientDress> & { counts: Record<string, number> }> {
     const take = Math.min(limit, MAX_PAGE_LIMIT);
     const where: Prisma.DressWhereInput = status === 'all' ? {} : { status };
+    // Narrows the rows and the total, but deliberately NOT `counts` below:
+    // the tab badges report how many listings await moderation overall, and
+    // making them follow the category filter would mean "ממתינות (0)" while
+    // pending listings in other categories sit unreviewed.
+    if (category) where.category = category;
 
     // groupBy sits outside the transaction the other two share: the tab
     // badges are a summary, they don't have to be consistent with the page
@@ -528,9 +572,23 @@ export class DressesService {
 
     const { images, email: _ignored, ...fields } = dto;
 
+    // Never trust the client's own normalization. The publish form applies
+    // the same rules for immediate feedback (see frontend/src/lib/normalize.js),
+    // but that copy exists so the lister sees the chip they'll get back — it
+    // is not a validation layer, and the form is not the only possible caller.
+    const sizes = normalizeSizes(fields.sizes);
+    const hashtags = normalizeHashtags(fields.hashtags);
+    const bridesmaidSetCount = resolveBridesmaidSetCount(
+      fields.category,
+      fields.bridesmaidSetCount,
+    );
+
     const created = await this.prisma.dress.create({
       data: {
         ...fields,
+        sizes,
+        hashtags,
+        bridesmaidSetCount,
         email,
         ownerId: owner.id,
         images: images?.length
@@ -556,8 +614,38 @@ export class DressesService {
    * incoming flat `string[]` can't express.
    */
   async updateDress(id: string, dto: UpdateDressDto): Promise<ClientDress> {
-    await this.assertDressExists(id);
-    const { images, ...fields } = dto;
+    // Not assertDressExists: this update needs the row's stored category to
+    // resolve the bridesmaid rule below, and one read can answer both
+    // questions.
+    const existing = await this.prisma.dress.findUnique({
+      where: { id },
+      select: { category: true, bridesmaidSetCount: true },
+    });
+    if (!existing) throw new NotFoundException('השמלה לא נמצאה');
+
+    // `bridesmaidSetCount` is destructured out rather than left on `fields`:
+    // the resolver can legitimately return null (clear the column), which the
+    // DTO's `number | undefined` type can't hold. Passing it separately keeps
+    // that honest instead of casting the null through.
+    const { images, bridesmaidSetCount: incoming, ...fields } = dto;
+
+    // Absent means "leave it alone" on a partial update; present means
+    // "replace the whole set", which is how `images` already behaves.
+    if (fields.sizes) fields.sizes = normalizeSizes(fields.sizes);
+    if (fields.hashtags) fields.hashtags = normalizeHashtags(fields.hashtags);
+
+    /* The bridesmaid rule needs the EFFECTIVE category, not the payload's.
+       An edit that only changes the title carries no category, and resolving
+       against `undefined` would null out a bridesmaid listing's set count on
+       every unrelated save. Falling back to the stored category makes the
+       three cases behave: switching to bridesmaid requires a count, switching
+       away nulls it, and leaving the category alone keeps whatever is
+       already there unless this payload explicitly changes it. */
+    const effectiveCategory = fields.category ?? existing.category;
+    const bridesmaidSetCount = resolveBridesmaidSetCount(
+      effectiveCategory,
+      incoming === undefined ? existing.bridesmaidSetCount : incoming,
+    );
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (images) {
@@ -581,7 +669,7 @@ export class DressesService {
       }
       return tx.dress.update({
         where: { id },
-        data: fields,
+        data: { ...fields, bridesmaidSetCount },
         include: CLIENT_INCLUDE,
       });
     });
@@ -792,8 +880,10 @@ export class DressesService {
    * admin's ability to follow it up. The owner is told the count before
    * confirming, so this is disclosed rather than silent.
    *
-   * Everything else hangs off `Dress` with onDelete: Cascade (images, sizes,
+   * Everything else hangs off `Dress` with onDelete: Cascade (images,
    * availability, bookings, reviews, favourites) and goes with the row.
+   * `sizes` used to be in that list back when it was a DressSize relation;
+   * it is a String[] column on the row itself now, so it needs no cascade.
    */
   async deleteDress(id: string, requesterEmail: string): Promise<void> {
     const dress = await this.prisma.dress.findUnique({

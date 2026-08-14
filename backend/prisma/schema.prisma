@@ -34,6 +34,33 @@ datasource db {
 // localStorage mock — those four columns are now plain text holding the
 // Hebrew labels the UI already uses. See the comment above `model Dress`.
 
+/// What occasion a listing is for. DELIBERATELY A REAL ENUM WITH ENGLISH
+/// SLUGS, unlike the four plain-text columns described above.
+///
+/// The reasoning that made those four Hebrew text columns does not apply
+/// here. They are compared directly against Hebrew labels the filter UI
+/// already holds, so an enum would have meant a translation layer on every
+/// read and write. `category` is a different kind of value: a stable,
+/// linkable identity. The homepage's four category tiles link to
+/// `?categories=bridal`, and a URL is no place for a Hebrew label that a
+/// copy edit could invalidate. The display strings ("כלה", "שושבינה",
+/// "ערב", "מידות גדולות") live in frontend/src/lib/data.js as a
+/// value→label map, so changing what a visitor reads never touches the
+/// database.
+///
+/// Orthogonal to `source`, which is provenance (custom-sewn vs. boutique).
+/// A bridal dress can be either — these are two independent facets, not
+/// rival spellings of one idea.
+///
+/// `plus_size` is snake_case because it is the only two-word member; the
+/// rest stay single lowercase words. It travels in browse URLs as-is.
+enum DressCategory {
+  bridal
+  bridesmaid
+  evening
+  plus_size
+}
+
 // Mirrors the (now-retired) TypeORM `users` entity field-for-field, so the
 // SQLite → Postgres move is a pure persistence swap with no behaviour change.
 // NOTE: `id` is app-generated (uuid) rather than mirroring auth.users.id from
@@ -107,17 +134,45 @@ model Dress {
   // server-side at create time.
   phone        String?
   email        String?
-  // The single size this listing is offered in. The `sizes` relation below
-  // predates the publish form and stays for the (dormant) multi-size
-  // booking flow; the form writes this scalar.
-  size         String?
+  // Every size this one physical listing fits, e.g. ["S", "M"] or ["38"].
+  //
+  // Replaced a single `size String?` scalar. It also took over the name from
+  // a `sizes DressSize[]` relation that was dropped in the same migration:
+  // that model was dead — nothing in the backend or the frontend ever read
+  // or wrote it, and Booking carries its own `size` column — so it was a
+  // dormant table squatting on the name the real field wanted.
+  //
+  // NOT constrained to a fixed list, by design. The publish form offers the
+  // standard sizes as chips plus an "אחר" (other) option that reveals a
+  // free-text field, so a lister can enter something the list doesn't cover
+  // ("מידה אחת", "38 ארוך"). The DTO therefore validates shape rather than
+  // membership — see normalizeSizes in src/dresses/dress-normalize.ts, which
+  // trims, strips commas (the browse query serializes this facet as CSV),
+  // folds case-insensitive matches back onto the standard spelling so `xl`
+  // and `XL` can't become invisible near-duplicates, dedupes, and caps the
+  // count.
+  sizes        String[]
+  // The occasion this listing is for. Required — see the DressCategory enum.
+  category     DressCategory
+  // How many dresses are in the set, and ONLY meaningful when `category` is
+  // `bridesmaid` (bridesmaid listings are sold as a matched set). Enforced in
+  // the service rather than by a DB constraint: required when the category is
+  // bridesmaid, forced to null for every other category, on both create and
+  // update. The individual dresses and their sizes go in `desc` — the publish
+  // form prompts for that explicitly rather than modelling a set as rows.
+  bridesmaidSetCount Int?
+  // Free-text discovery tags, stored without a leading "#" and re-added for
+  // display. No fixed vocabulary yet; autocomplete is a later feature and can
+  // be built on top of this column without a schema change. Normalized on
+  // write (see normalizeHashtags) and matched by the browse endpoint's `q`
+  // text search rather than a filter facet of its own.
+  hashtags     String[]
   ownerId      String
   owner        User                @relation(fields: [ownerId], references: [id])
   status       String              @default("pending") // pending | approved | rejected
   // Admin's note when status is "rejected", surfaced to the owner in their
   // listings view. Empty/null for pending and approved listings.
   rejectReason String?
-  sizes        DressSize[]
   images       DressImage[]
   bookings     Booking[]
   reviews      Review[]
@@ -146,17 +201,21 @@ model Dress {
   // createdAt to still serve the sort — a plain @@index([status]) would
   // filter but leave a sort of the whole matching set on every page.
   @@index([status, createdAt])
+  // Backs the category facet in the browse filter and the homepage tiles.
+  // Deliberately a plain single-column index rather than folding category
+  // into the [status, createdAt] composite: category is one of several
+  // optional facets a browse query may or may not carry, whereas status is
+  // on every single one.
+  @@index([category])
 }
 
-model DressSize {
-  id        String  @id @default(uuid())
-  dress     Dress   @relation(fields: [dressId], references: [id], onDelete: Cascade)
-  dressId   String
-  size      String // XS, S, M, L, XL, XXL
-  available Boolean @default(true)
-
-  @@index([dressId])
-}
+// NOTE: `model DressSize` used to sit here — a per-dress size row with an
+// `available` flag, left over from a multi-size booking flow that was never
+// built. It was dead in the strictest sense: no query, service, controller
+// or component in either the backend or the frontend referenced it, and
+// Booking has always carried its own `size` column. It was dropped when
+// `Dress.sizes` became a real String[], because the dead relation was
+// holding the name. Nothing was migrated out of it; the table was empty.
 
 // NOTE ON THE PRIMARY/COVER PHOTO: there is no `isPrimary` flag and no
 // `coverImageId` on Dress — the cover is whichever row has the lowest

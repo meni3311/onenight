@@ -1,16 +1,30 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { DressCategory } from '@prisma/client';
 import {
   ArrayMaxSize,
+  ArrayNotEmpty,
   IsArray,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsPositive,
   IsString,
   IsUrl,
+  Max,
   MaxLength,
+  Min,
 } from 'class-validator';
 import { CONDITIONS, LENGTHS, SOURCES } from './create-dress.dto';
+import {
+  BRIDESMAID_SET_MAX,
+  BRIDESMAID_SET_MIN,
+  CATEGORIES,
+  MAX_HASHTAG_LENGTH,
+  MAX_RAW_HASHTAGS,
+  MAX_RAW_SIZES,
+  MAX_SIZE_LENGTH,
+} from '../dress-normalize';
 
 /**
  * Body for PATCH /dresses/:id — the owner's inline edit form in AccountPage.
@@ -50,7 +64,48 @@ export class UpdateDressDto {
 
   @ApiPropertyOptional() @IsOptional() @IsString() region?: string;
 
-  @ApiPropertyOptional() @IsOptional() @IsString() size?: string;
+  /**
+   * Replaces the whole size set when present. Same shape rules as create —
+   * see CreateDressDto.sizes for why this isn't whitelisted against a fixed
+   * list. Omitting it leaves the stored sizes untouched; sending an empty
+   * array is rejected, because a listing with no size is not a listing.
+   */
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  @MaxLength(MAX_SIZE_LENGTH, { each: true })
+  @ArrayMaxSize(MAX_RAW_SIZES)
+  sizes?: string[];
+
+  @ApiPropertyOptional({ enum: CATEGORIES })
+  @IsOptional()
+  @IsIn(CATEGORIES)
+  category?: DressCategory;
+
+  /**
+   * Only meaningful for bridesmaid listings. On a partial update the service
+   * resolves the EFFECTIVE category first — the incoming one if this payload
+   * carries it, otherwise the row's stored one — so an edit that only touches
+   * the title can't null out a bridesmaid listing's count. See
+   * resolveBridesmaidSetCount.
+   */
+  @ApiPropertyOptional({ minimum: BRIDESMAID_SET_MIN, maximum: BRIDESMAID_SET_MAX })
+  @IsOptional()
+  @IsInt()
+  @Min(BRIDESMAID_SET_MIN)
+  @Max(BRIDESMAID_SET_MAX)
+  bridesmaidSetCount?: number;
+
+  /** Replaces the whole tag set when present. Normalized server-side. */
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(MAX_HASHTAG_LENGTH * 2, { each: true })
+  @ArrayMaxSize(MAX_RAW_HASHTAGS)
+  hashtags?: string[];
 
   @ApiPropertyOptional() @IsOptional() @IsString() phone?: string;
 

@@ -1,24 +1,72 @@
 import { useState, useEffect } from "react";
-import { REGIONS, SIZES, CONDITIONS, placeholder } from "../lib/data.js";
+import { REGIONS, SIZES, CONDITIONS, CATEGORIES, CATEGORY_LABELS, placeholder } from "../lib/data.js";
 import { api, deleteDress, getDressInquiryCount, getMyDresses, sendOtp, deleteAccount } from "../lib/api.js";
+import { SizeMultiSelect } from "../components/ui/SizeMultiSelect.jsx";
+import { HashtagInput } from "../components/ui/HashtagInput.jsx";
 import { DressAvailabilityCalendar } from "../components/calendar/DressAvailabilityCalendar.jsx";
 import { ConfirmModal } from "../components/ui/ConfirmModal.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const OTP_RE = /^\d{6}$/;
 
-/* Inline edit form for one of the user's dress listings. */
+/* Inline edit form for one of the user's dress listings.
+
+   Carries the same fields as the publish form for everything this feature
+   touches — category, sizes, the bridesmaid set count and hashtags are all
+   editable after the fact, not just at creation. */
 function EditFields({ d, setD }) {
   const set = (k, val) => setD((p) => ({ ...p, [k]: val }));
   return (
     <div className="form-grid mt-3">
       <div className="field full"><label>כותרת</label><input type="text" value={d.title} onChange={(e) => set("title", e.target.value)} /></div>
+
+      <div className="field full"><label>קטגוריה</label>
+        <div className="chips">
+          {CATEGORIES.map((c) => (
+            <button
+              key={c.value}
+              type="button"
+              aria-pressed={d.category === c.value}
+              className={"chip" + (d.category === c.value ? " on" : "")}
+              /* Switching away from bridesmaid clears the count here as well
+                 as server-side, so the input doesn't keep a stale number
+                 alive behind a hidden field. */
+              onClick={() => setD((p) => ({
+                ...p,
+                category: c.value,
+                bridesmaidSetCount: c.value === "bridesmaid" ? p.bridesmaidSetCount : null,
+              }))}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {d.category === "bridesmaid" && (
+        <div className="field"><label>כמה שמלות בסט</label>
+          <input
+            type="number" min="2" max="20"
+            value={d.bridesmaidSetCount ?? ""}
+            onChange={(e) => set("bridesmaidSetCount", e.target.value === "" ? null : +e.target.value)}
+          />
+          <p className="mt-1 text-[11px] text-[var(--muted)]">נא לפרט בתיאור את השמלות שבסט ואת המידות שלהן</p>
+        </div>
+      )}
+
       <div className="field full"><label>תיאור</label><textarea rows="2" value={d.desc} onChange={(e) => set("desc", e.target.value)} /></div>
       <div className="field"><label>צבע</label><input type="text" value={d.color} onChange={(e) => set("color", e.target.value)} /></div>
       <div className="field"><label>מחיר ₪</label><input type="number" value={d.price} onChange={(e) => set("price", +e.target.value)} /></div>
       <div className="field"><label>מצב</label><select value={d.condition} onChange={(e) => set("condition", e.target.value)}>{CONDITIONS.map((c) => <option key={c}>{c}</option>)}</select></div>
       <div className="field"><label>אזור</label><select value={d.region} onChange={(e) => set("region", e.target.value)}>{REGIONS.map((c) => <option key={c}>{c}</option>)}</select></div>
-      <div className="field"><label>מידה</label><select value={d.size} onChange={(e) => set("size", e.target.value)}>{SIZES.map((c) => <option key={c}>{c}</option>)}</select></div>
+
+      <div className="field full"><label>מידות</label>
+        <SizeMultiSelect options={SIZES} value={d.sizes || []} onChange={(next) => set("sizes", next)} />
+      </div>
+
+      <div className="field full"><label>תגיות</label>
+        <HashtagInput value={d.hashtags || []} onChange={(next) => set("hashtags", next)} />
+      </div>
     </div>
   );
 }
@@ -89,7 +137,14 @@ export default function AccountPage({ user, onOpen, setUser, toast, initialTab }
     try {
       const updated = await api("/api/dresses/" + editing.id, { method: "PATCH", body: {
         title: editing.title, desc: editing.desc, color: editing.color, price: +editing.price,
-        condition: editing.condition, region: editing.region, size: editing.size,
+        condition: editing.condition, region: editing.region,
+        sizes: editing.sizes, category: editing.category, hashtags: editing.hashtags,
+        /* Omitted rather than sent as null for non-bridesmaid listings: the
+           DTO validates it as an int when present, and the service nulls it
+           for other categories anyway (resolveBridesmaidSetCount). */
+        ...(editing.category === "bridesmaid"
+          ? { bridesmaidSetCount: +editing.bridesmaidSetCount }
+          : {}),
       } });
       setDresses((p) => p.map((d) => (d.id === updated.id ? updated : d)));
       setEditing(null); toast("הפרטים עודכנו ✓");
@@ -194,7 +249,9 @@ export default function AccountPage({ user, onOpen, setUser, toast, initialTab }
               <strong className="serif text-[20px]">{d.title}</strong>
               <span className={"status-pill status-" + d.status}>{STATUS_LABELS[d.status]}</span>
             </div>
-            <div className="card-meta">מידה {d.size} · {d.region} · {d.price} ₪</div>
+            <div className="card-meta">
+              {CATEGORY_LABELS[d.category] || "—"} · מידות {(d.sizes || []).join(", ") || "—"} · {d.region} · {d.price} ₪
+            </div>
             {editing && editing.id === d.id ? <EditFields d={editing} setD={setEditing} /> :
               <div className="mt-2.5 flex flex-wrap gap-2 [&>*]:flex-1">
                 <button className="btn btn-ghost" onClick={() => setEditing(d)}>✏️ עריכה</button>

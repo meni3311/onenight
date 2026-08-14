@@ -3,6 +3,7 @@ import { Img } from "../components/ui/Img.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock.js";
 import { getDress, getSimilarDresses, withBase } from "../lib/api.js";
+import { CATEGORY_LABELS } from "../lib/data.js";
 
 /* ============================================================================
    ProductPage — full dedicated dress page (mobile-first, RTL).
@@ -260,9 +261,13 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
   const booked = d.booked || [];
   const sellerLabel = d.source === "שם חנות" ? (d.store || "בוטיק") : (d.source || "תפירה אישית");
 
-  /* this physical garment is a single size; that size is the only one in stock */
-  const sizeList = STD_SIZES.includes(d.size) ? STD_SIZES : [...STD_SIZES, d.size];
-  const isSizeAvailable = (s) => s === d.size;
+  /* A listing carries every size it fits now, not one. The picker offers the
+     standard run plus any non-standard size this dress was actually listed
+     under ("מידה אחת", "38 ארוך" — see the Other field in SizeMultiSelect),
+     and everything the dress fits is selectable rather than just one chip. */
+  const dressSizes = d.sizes || [];
+  const sizeList = [...STD_SIZES, ...dressSizes.filter((s) => !STD_SIZES.includes(s))];
+  const isSizeAvailable = (s) => dressSizes.includes(s);
 
   const pickDate = (k) => {
     setRange((p) => {
@@ -348,6 +353,9 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
 
         {/* SECTION 2 — identity */}
         <section className="op-sec op-anim" style={{ animationDelay: "80ms" }}>
+          {CATEGORY_LABELS[d.category] && (
+            <span className="op-category">{CATEGORY_LABELS[d.category]}</span>
+          )}
           <h1 className="op-name">{d.title}</h1>
           <p className="op-seller">{sellerLabel}</p>
           <p className="op-price">₪{d.price} <span>/ לערב</span></p>
@@ -373,7 +381,23 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
               );
             })}
           </div>
+          {/* Set size sits with the sizes rather than in the details
+              accordion: for a bridesmaid listing "how many dresses" is part of
+              reading the size row, not a detail to expand for. The per-dress
+              breakdown is in the description, which the publish form asks the
+              lister for explicitly. */}
+          {d.category === "bridesmaid" && d.bridesmaidSetCount > 0 && (
+            <p className="op-setcount">סט של {d.bridesmaidSetCount} שמלות · פירוט המידות בתיאור השמלה</p>
+          )}
           <button type="button" className="op-sizeguide" onClick={() => setSizeGuide(true)}>מה המידה שלי?</button>
+
+          {d.hashtags?.length > 0 && (
+            <div className="op-tags">
+              {d.hashtags.map((tag) => (
+                <span key={tag} className="op-tag">#{tag}</span>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* SECTION 4 — dates */}
@@ -387,7 +411,10 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
         <section className="op-sec op-anim" style={{ animationDelay: "320ms" }}>
           <AccordionRow title="פרטי השמלה" open={openAcc === 0} onToggle={() => setOpenAcc(openAcc === 0 ? -1 : 0)}>
             {d.desc && <p>{d.desc}</p>}
+            <p>קטגוריה: {CATEGORY_LABELS[d.category] || "—"}</p>
+            <p>מידות: {dressSizes.join(", ") || "—"}</p>
             <p>צבע: {d.color || "—"}</p>
+            {/* Distinct from קטגוריה above: provenance, not occasion. */}
             <p>מקור: {sellerLabel}</p>
             <p>מצב: {d.condition || "—"}</p>
             <p>אזור: {d.region || "—"}</p>
@@ -679,6 +706,12 @@ const CSS = `
 .op-h2{font-family:${SERIF};font-size:20px;font-weight:500;color:${C.ink};margin:0 0 16px;}
 
 /* SECTION 2 — identity */
+/* Category badge. Square corners, matching the grid card's own badge and the
+   sharp-cornered language of the cards themselves — a property of the dress,
+   not a transient UI state, so it does not get the rounded/glass treatment. */
+.op-category{display:inline-block;font-family:${UI};font-size:10px;font-weight:500;
+  letter-spacing:2px;background:${C.ink};color:${C.cream};border-radius:0;
+  padding:4px 10px;margin:0 0 10px;}
 .op-name{font-family:${SERIF};font-size:26px;font-weight:500;color:${C.ink};margin:0;line-height:1.2;}
 .op-seller{font-family:${UI};font-size:11px;font-weight:400;text-transform:uppercase;
   letter-spacing:2px;color:${C.muted};margin:8px 0 0;}
@@ -704,6 +737,13 @@ const CSS = `
   cursor:not-allowed;background:${C.white};}
 .op-sizeguide{margin-top:14px;background:none;border:none;padding:0;cursor:pointer;
   font-family:${UI};font-size:12px;color:${C.fuchsia};text-decoration:underline;}
+/* Bridesmaid set size — reads as a note on the size row above it. */
+.op-setcount{font-family:${UI};font-size:12px;color:${C.subtle};margin:12px 0 0;}
+/* Hashtag chips: square, hairline, muted. Decoration, not navigation — they
+   are not clickable yet, and will not be until the tag pages exist. */
+.op-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:16px;}
+.op-tag{font-family:${UI};font-size:11px;color:${C.subtle};border:1px solid ${C.divider};
+  border-radius:0;padding:4px 8px;}
 
 /* SECTION 4 — calendar */
 .op-cal{max-width:360px;margin:0 auto;}

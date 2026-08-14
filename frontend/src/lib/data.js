@@ -3,7 +3,38 @@
    ============================================================ */
 
 export const REGIONS = ["צפון","חיפה והכרמל","מרכז","גוש דן","ירושלים","דרום","שומרון ויהודה"];
-export const SIZES = ["XS","S","M","L","XL","XXL","34","36","38","40","42","44","46","48","50","52","אחר"];
+/* The sizes the publish form offers as chips. Mirrors STANDARD_SIZES in
+   backend/src/dresses/dress-normalize.ts — keep the two in sync.
+
+   NOTE WHAT IS NO LONGER HERE: "אחר". It used to be a storable value, so a
+   dress could literally be listed at size "אחר", which told a renter nothing.
+   It is a UI affordance now — selecting it reveals a free-text field, and what
+   gets stored is whatever was typed there. See SizeMultiSelect.jsx. */
+export const SIZES = ["XS","S","M","L","XL","XXL","34","36","38","40","42","44","46","48","50","52"];
+
+/* Label for the chip that reveals the free-text size field. Never a value. */
+export const OTHER_SIZE = "אחר";
+
+/* Occasion categories. `value` is the DressCategory enum member stored in
+   Postgres and carried in browse URLs (?categories=bridal); `label` is the
+   only part a visitor ever reads.
+
+   The split keeps copy edits in this file: renaming "מידות גדולות" is one
+   line here and touches neither the database nor any existing link. Mirrors
+   the DressCategory enum in backend/prisma/schema.prisma. */
+export const CATEGORIES = [
+  { value: "bridal",     label: "כלה" },
+  { value: "bridesmaid", label: "שושבינה" },
+  { value: "evening",    label: "ערב" },
+  { value: "plus_size",  label: "מידות גדולות" },
+];
+
+/* value → label, for the card badge / detail page / admin row — all of which
+   hold a stored category and just need something to render. */
+export const CATEGORY_LABELS = Object.fromEntries(
+  CATEGORIES.map((c) => [c.value, c.label]),
+);
+
 export const CONDITIONS = ["חדשה","כמו חדשה","טובה מאוד","טובה","סבירה"];
 /* Structured filter categories: dress length + sleeve length. The old
    free-form `LENGTHS`/`length` field that used to duplicate `DRESS_LENGTHS`

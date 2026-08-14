@@ -1,13 +1,19 @@
 import { useState, useEffect } from "react";
-import { REGIONS, SIZES, CONDITIONS, DRESS_LENGTHS, SLEEVE_LENGTHS } from "../lib/data.js";
+import { REGIONS, SIZES, CONDITIONS, DRESS_LENGTHS, SLEEVE_LENGTHS, CATEGORIES } from "../lib/data.js";
 import { DEFAULT_DRESS_COLOR_HEX } from "../constants/theme.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { ImageUploader } from "../components/ui/ImageUploader.jsx";
+import { SizeMultiSelect } from "../components/ui/SizeMultiSelect.jsx";
+import { HashtagInput } from "../components/ui/HashtagInput.jsx";
 
+/* `size` became `sizes` (an array) and moved to its own state below, alongside
+   `hashtags` — this object holds the flat string fields the `set()` helper
+   drives, and putting arrays in it would mean cloning them on every keystroke
+   in an unrelated field. */
 const EMPTY_FORM = {
   title: "", desc: "", color: "", condition: "", price: "",
-  region: "", city: "", size: "", source: "", store: "", phone: "", email: "",
-  dressLength: "", sleeveLength: "",
+  region: "", city: "", source: "", store: "", phone: "", email: "",
+  dressLength: "", sleeveLength: "", category: "", bridesmaidSetCount: "",
 };
 const MAX_IMAGES = 3;
 
@@ -19,6 +25,8 @@ const normalizePhone = (s) => (s || "").replace(/\D/g, "");
 export default function PublishPage({ onSubmit, goHome }) {
   const { isLoggedIn, account } = useAuth();
   const [v, setV] = useState(() => ({ ...EMPTY_FORM, email: account?.email || "" }));
+  const [sizes, setSizes] = useState([]);
+  const [hashtags, setHashtags] = useState([]);
   const [images, setImages] = useState([]);
   const [errors, setErrors] = useState({});
   /* Required acknowledgment of the two notice boxes below, replacing the
@@ -44,12 +52,22 @@ export default function PublishPage({ onSubmit, goHome }) {
     const e = {};
     if (!v.title.trim()) e.title = "נא להזין כותרת";
     if (!v.desc.trim()) e.desc = "נא להזין תיאור";
+    if (!v.category) e.category = "נא לבחור קטגוריה";
+    /* Mirrors the server's rule (resolveBridesmaidSetCount): required only
+       for bridesmaid listings, ignored everywhere else. The field is hidden
+       for other categories, so a stale value can't fail a submit. */
+    if (v.category === "bridesmaid") {
+      const n = +v.bridesmaidSetCount;
+      if (!v.bridesmaidSetCount || !Number.isInteger(n) || n < 2 || n > 20) {
+        e.bridesmaidSetCount = "נא להזין כמה שמלות יש בסט (2–20)";
+      }
+    }
     if (!v.condition) e.condition = "נא לבחור מצב";
     if (!v.dressLength) e.dressLength = "נא לבחור אורך שמלה";
     if (!v.sleeveLength) e.sleeveLength = "נא לבחור אורך שרוול";
     if (!v.price || +v.price <= 0) e.price = "נא להזין מחיר";
     if (!v.region) e.region = "נא לבחור אזור";
-    if (!v.size) e.size = "נא לבחור מידה";
+    if (!sizes.length) e.sizes = "נא לבחור לפחות מידה אחת";
     if (!v.source) e.source = "נא לבחור מקור";
     if (v.source === "שם חנות" && !v.store.trim()) e.store = "נא להזין שם חנות";
     if (!/^0\d{8,9}$/.test(normalizePhone(v.phone))) e.phone = "מספר טלפון לא תקין (לדוגמה 050-1234567)";
@@ -79,8 +97,22 @@ export default function PublishPage({ onSubmit, goHome }) {
     if (!validate()) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     setSubmitting(true);
     try {
-      /* Phone is contact info only — never used to match ownership. */
-      await onSubmit({ ...v, phone: normalizePhone(v.phone), price: +v.price, images, colorHex: DEFAULT_DRESS_COLOR_HEX });
+      /* Phone is contact info only — never used to match ownership.
+
+         `bridesmaidSetCount` is sent only for bridesmaid listings and omitted
+         entirely otherwise, rather than sent as null: the DTO runs with
+         `forbidNonWhitelisted`, and an empty-string number field would fail
+         @IsInt before the service ever got to ignore it. */
+      await onSubmit({
+        ...v,
+        sizes,
+        hashtags,
+        bridesmaidSetCount: v.category === "bridesmaid" ? +v.bridesmaidSetCount : undefined,
+        phone: normalizePhone(v.phone),
+        price: +v.price,
+        images,
+        colorHex: DEFAULT_DRESS_COLOR_HEX,
+      });
     } catch {
       setSubmitting(false);
     }
@@ -95,6 +127,51 @@ export default function PublishPage({ onSubmit, goHome }) {
           <div className="field full"><label>כותרת</label>
             <input type="text" placeholder="לדוגמה: שמלת ערב אדומה זוהרת" value={v.title} onChange={(e) => set("title", e.target.value)} />
             {errors.title && <span className="err">{errors.title}</span>}</div>
+
+          {/* Category sits above the description on purpose: choosing
+              "שושבינה" changes what the description is supposed to contain
+              (see the note below), so the choice has to come first. */}
+          <div className="field full"><label>קטגוריה</label>
+            <div className="chips">
+              {CATEGORIES.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  aria-pressed={v.category === c.value}
+                  className={"chip" + (v.category === c.value ? " on" : "")}
+                  onClick={() => set("category", c.value)}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+            {errors.category && <span className="err">{errors.category}</span>}</div>
+
+          {v.category === "bridesmaid" && (
+            <div className="field"><label>כמה שמלות בסט</label>
+              <input
+                type="number" min="2" max="20" placeholder="לדוגמה: 4"
+                value={v.bridesmaidSetCount}
+                onChange={(e) => set("bridesmaidSetCount", e.target.value)}
+              />
+              {errors.bridesmaidSetCount && <span className="err">{errors.bridesmaidSetCount}</span>}</div>
+          )}
+
+          {/* Bridesmaid sets are several garments under one listing, and the
+              size chips below describe the set as a whole. The per-dress
+              breakdown has nowhere else to go, so the description carries it
+              and this note says so — right above the field it's asking about,
+              rather than as a placeholder that vanishes on first keystroke. */}
+          {v.category === "bridesmaid" && (
+            <div className="field full">
+              <div className="notice-box">
+                <p className="notice-box-title">סט שושבינות</p>
+                <p className="notice-box-text">
+                  נא לפרט בתיאור את השמלות שבסט ואת המידה של כל אחת מהן — כך השוכרת תדע בדיוק מה היא מקבלת.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="field full"><label>תיאור</label>
             <textarea rows="3" placeholder="ספרי על השמלה — סגנון, גזרה, מתי נלבשה…" value={v.desc} onChange={(e) => set("desc", e.target.value)} />
@@ -130,10 +207,12 @@ export default function PublishPage({ onSubmit, goHome }) {
           <div className="field"><label>עיר</label>
             <input type="text" placeholder="לדוגמה: תל אביב" value={v.city} onChange={(e) => set("city", e.target.value)} /></div>
 
-          <div className="field"><label>מידה</label>
-            <select value={v.size} onChange={(e) => set("size", e.target.value)}>
-              <option value="">בחרי…</option>{SIZES.map((c) => <option key={c}>{c}</option>)}
-            </select>{errors.size && <span className="err">{errors.size}</span>}</div>
+          {/* Multi-select now — one physical dress can genuinely fit more than
+              one size. "אחר" reveals a free-text box for anything the list
+              doesn't cover; see SizeMultiSelect. */}
+          <div className="field full"><label>מידות</label>
+            <SizeMultiSelect options={SIZES} value={sizes} onChange={setSizes} />
+            {errors.sizes && <span className="err">{errors.sizes}</span>}</div>
 
           <div className="field"><label>מקור</label>
             <select value={v.source} onChange={(e) => set("source", e.target.value)}>
@@ -160,6 +239,12 @@ export default function PublishPage({ onSubmit, goHome }) {
               <input type="email" placeholder="your@email.com" value={v.email} onChange={(e) => set("email", e.target.value)} />
             )}
             {errors.email && <span className="err">{errors.email}</span>}</div>
+
+          {/* Optional and free-text — no fixed vocabulary yet, autocomplete
+              comes later. Stored bare, displayed with a "#". */}
+          <div className="field full"><label>תגיות (לא חובה)</label>
+            <HashtagInput value={hashtags} onChange={setHashtags} />
+          </div>
 
           <div className="field full"><label>תמונות (עד 3)</label>
             <ImageUploader images={images} setImages={setImages} max={MAX_IMAGES} error={errors.images} />

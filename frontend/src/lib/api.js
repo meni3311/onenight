@@ -139,10 +139,12 @@ export function getMyDresses(email) {
  * Resolves with `{ items, total, page, limit, counts }`, where `counts` holds
  * every status regardless of which one was requested — the tab badges read it.
  */
-export function getAdminDresses(status, adminPw, page = 1) {
-  return api(`/api/admin/dresses?status=${encodeURIComponent(status)}&page=${page}`, {
-    adminPw,
-  });
+export function getAdminDresses(status, adminPw, page = 1, category = "") {
+  const qs = new URLSearchParams({ status, page: String(page) });
+  /* Omitted rather than sent empty when the admin hasn't picked one: the DTO
+     validates this against the DressCategory enum, and "" is not a member. */
+  if (category) qs.set("category", category);
+  return api(`/api/admin/dresses?${qs}`, { adminPw });
 }
 
 /**

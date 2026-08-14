@@ -1,6 +1,13 @@
 import { memo } from "react";
 import { Img } from "../ui/Img.jsx";
 import { COLORS, FONTS } from "../../constants/theme.js";
+import { CATEGORY_LABELS } from "../../lib/data.js";
+
+/* How many tags a card shows before it stops. The card is a thumbnail with a
+   few lines of text under it; a listing with fifteen tags would push the grid
+   rows out of alignment with one another. The full set is on the detail page,
+   which has the room. */
+const CARD_HASHTAGS = 3;
 
 /* Product card: 3:4 image, hover zoom, glassy favorite toggle and a
    pending-approval flag for account/admin views.
@@ -48,6 +55,31 @@ function ProductCardBase({ d, fav, onFav, onOpen, priority = false }) {
           </svg>
         </button>
 
+        {/* Category badge. Square corners and a solid bordeaux fill, matching
+            the card's own borderRadius: 0 and the brand palette — deliberately
+            NOT the glassy rounded treatment of the favourite button and the
+            pending flag, which are transient UI states rather than a property
+            of the dress. */}
+        {CATEGORY_LABELS[d.category] && (
+          <span
+            style={{
+              position: "absolute",
+              insetInlineEnd: "12px",
+              top: "12px",
+              borderRadius: 0,
+              background: COLORS.bordeaux,
+              color: COLORS.cream,
+              fontFamily: FONTS.jost,
+              fontSize: "10px",
+              fontWeight: 500,
+              letterSpacing: "0.12em",
+              padding: "4px 9px",
+            }}
+          >
+            {CATEGORY_LABELS[d.category]}
+          </span>
+        )}
+
         {/* status flag for account/admin views — kept subtle & glassy */}
         {d.status === "pending" && (
           <span className="absolute bottom-3 right-3 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium text-neutral-700 backdrop-blur-sm">
@@ -66,7 +98,10 @@ function ProductCardBase({ d, fav, onFav, onOpen, priority = false }) {
           textTransform: "uppercase",
           color: "#999",
         }}>
-          מידה {d.size}{d.city ? ` · ${d.city}` : ""}
+          {/* `sizes` is an array now — every size this dress fits, not one.
+              Guarded because ProductPage hands the card shape around and a
+              stale object could still be a pre-migration one. */}
+          מידות {(d.sizes || []).join(" · ") || "—"}{d.city ? ` · ${d.city}` : ""}
         </p>
 
         {/* Price — letter-spaced, with a lighter per-rental label */}
@@ -91,6 +126,29 @@ function ProductCardBase({ d, fav, onFav, onOpen, priority = false }) {
             / לערב
           </span>
         </p>
+
+        {/* Hashtag chips. Square, hairline-bordered and muted — they sit under
+            the price and must not compete with it. */}
+        {d.hashtags?.length > 0 && (
+          <div style={{ marginTop: "7px", display: "flex", flexWrap: "wrap", gap: "4px" }}>
+            {d.hashtags.slice(0, CARD_HASHTAGS).map((tag) => (
+              <span
+                key={tag}
+                style={{
+                  fontFamily: FONTS.jost,
+                  fontSize: "10px",
+                  letterSpacing: "0.04em",
+                  color: COLORS.eyebrow,
+                  border: `1px solid ${COLORS.brandLight}`,
+                  borderRadius: 0,
+                  padding: "2px 6px",
+                }}
+              >
+                #{tag}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </article>
   );

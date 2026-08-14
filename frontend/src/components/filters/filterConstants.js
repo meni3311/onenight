@@ -15,11 +15,17 @@ export const COLOR_SWATCHES = [
   { name: "סגול", hex: "#5E4B79" },
 ];
 
-/* Letter sizes only — numeric sizes are intentionally omitted from the filter UI.
-   "אחר" is included since dresses can be listed under that size too (see
-   SIZES in lib/data.js — the two lists are separate on purpose, not a
-   duplication: this one deliberately excludes numeric sizes). */
-export const LETTER_SIZES = ["XS", "S", "M", "L", "XL", "XXL", "אחר"];
+/* Letter sizes only — numeric sizes are intentionally omitted from the filter
+   UI (see SIZES in lib/data.js — the two lists are separate on purpose, not a
+   duplication).
+
+   "אחר" used to be in this list as a matchable value, because a dress could
+   literally be listed at size "אחר". It is not a value any more: SizeMultiSelect
+   renders it as a chip that reveals a free-text box, and whatever that box
+   produces joins `f.sizes` alongside the letters, matched exactly against the
+   dress's own sizes. That box is also what finally lets someone filter for a
+   numeric size — which this list still deliberately doesn't offer as a chip. */
+export const LETTER_SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
 
 /* Source filter options: [value, label]. "הכל" (all) is the default. */
 export const SOURCE_OPTIONS = [
@@ -42,6 +48,9 @@ export const EMPTY_FILTERS = {
   maxPrice: PRICE.max,
   regions: [],
   sizes: [],
+  /* Multi-select like colours and sizes, not single-select like `source`.
+     The homepage's category tiles will just set one value here. */
+  categories: [],
   dressLengths: [],
   sleeveLengths: [],
   source: "all",
@@ -69,6 +78,7 @@ export function filtersToQuery(f, sort, page, limit = PAGE_LIMIT) {
   if (f.q) p.set("q", f.q);
   if (f.colors.length) p.set("colors", f.colors.join(","));
   if (f.sizes.length) p.set("sizes", f.sizes.join(","));
+  if (f.categories.length) p.set("categories", f.categories.join(","));
   if (f.regions.length) p.set("regions", f.regions.join(","));
   if (f.dressLengths.length) p.set("dressLengths", f.dressLengths.join(","));
   if (f.sleeveLengths.length) p.set("sleeveLengths", f.sleeveLengths.join(","));
@@ -88,6 +98,7 @@ export function activeFilterCount(f) {
   return (
     f.regions.length +
     f.sizes.length +
+    f.categories.length +
     f.colors.length +
     f.dressLengths.length +
     f.sleeveLengths.length +

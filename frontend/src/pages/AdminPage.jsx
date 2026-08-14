@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { placeholder } from "../lib/data.js";
+import { placeholder, CATEGORIES, CATEGORY_LABELS } from "../lib/data.js";
 import { api, getAdminDresses, getDress, withBase } from "../lib/api.js";
 import { AdminPhotosPanel } from "../components/admin/AdminPhotosPanel.jsx";
 import { useSessionStorage } from "../hooks/useSessionStorage.js";
@@ -46,6 +46,10 @@ export default function AdminPage({ toast, onOpen }) {
      panel appears. */
   const [rehydrating, setRehydrating] = useState(() => !!pw);
   const [tab, setTab] = useState("pending");
+  /* "" means every category. Server-side, like the status tabs — the queue is
+     paginated, so narrowing it in the browser would only filter the page in
+     hand and silently hide matches on later ones. */
+  const [categoryFilter, setCategoryFilter] = useState("");
   const [rejecting, setRejecting] = useState(null);
   const [reason, setReason] = useState("");
   // Dress id whose AI photo / manage-images panel is open.
@@ -93,11 +97,15 @@ export default function AdminPage({ toast, onOpen }) {
      request now rather than a filter over one big array. Approve/reject
      update the loaded rows in place, so this doesn't refire on a moderation
      decision and pull the row out from under the admin mid-click. */
-  const loadQueue = async (status) => {
+  const loadQueue = async (status, category) => {
     setQueueLoading(true);
     try {
-      const res = await getAdminDresses(status, pw);
+      const res = await getAdminDresses(status, pw, 1, category);
       setDresses(res?.items || []);
+      /* `counts` deliberately ignores the category filter server-side, so the
+         tab badges keep reporting the whole queue — otherwise filtering to
+         "כלה" would show "ממתינות (0)" while pending listings in other
+         categories sat unreviewed. */
       if (res?.counts) setCounts(res.counts);
     } catch (e) {
       toast("טעינת המודעות נכשלה: " + e.message);
@@ -108,9 +116,9 @@ export default function AdminPage({ toast, onOpen }) {
 
   useEffect(() => {
     if (!authed || tab === "inquiries") return;
-    loadQueue(tab);
+    loadQueue(tab, categoryFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, authed]);
+  }, [tab, authed, categoryFilter]);
 
   /* Rehydrate the admin session on mount.
      The stored password is re-checked against the server rather than
@@ -184,8 +192,8 @@ export default function AdminPage({ toast, onOpen }) {
     </div>
   );
 
-  /* No client-side status filter: the request was already scoped to this
-     tab's status. */
+  /* No client-side filtering at all: the request was already scoped to this
+     tab's status and, when one is picked, to the category too. */
   const filtered = dresses;
 
   /* A moderation decision moves the listing to a different tab, so it leaves
@@ -254,6 +262,32 @@ export default function AdminPage({ toast, onOpen }) {
         </button>
       </div>
 
+      {/* Category filter for the moderation queue. Hidden on the inquiries
+          tab, which lists booking requests rather than dresses. */}
+      {tab !== "inquiries" && (
+        <div className="chips mb-3">
+          <button
+            type="button"
+            aria-pressed={categoryFilter === ""}
+            className={"chip" + (categoryFilter === "" ? " on" : "")}
+            onClick={() => setCategoryFilter("")}
+          >
+            כל הקטגוריות
+          </button>
+          {CATEGORIES.map((c) => (
+            <button
+              key={c.value}
+              type="button"
+              aria-pressed={categoryFilter === c.value}
+              className={"chip" + (categoryFilter === c.value ? " on" : "")}
+              onClick={() => setCategoryFilter(c.value)}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {tab === "inquiries" ? (
         <>
           {inquiriesLoading && <div className="empty">טוען בקשות…</div>}
@@ -300,8 +334,15 @@ export default function AdminPage({ toast, onOpen }) {
                 <strong className="serif text-[20px]">{d.title}</strong>
                 <span className={"status-pill status-" + d.status}>{STATUS_LABELS[d.status]}</span>
               </div>
-              <div className="card-meta">{d.color} · מידה {d.size} · {d.region} · {d.price} ₪</div>
+              <div className="card-meta">
+                {CATEGORY_LABELS[d.category] || "—"}
+                {d.category === "bridesmaid" && d.bridesmaidSetCount ? ` (סט של ${d.bridesmaidSetCount})` : ""}
+                {" · "}{d.color} · מידות {(d.sizes || []).join(", ") || "—"} · {d.region} · {d.price} ₪
+              </div>
               <div className="card-meta">מקור: {d.source === "שם חנות" ? d.store : d.source} · טלפון: {d.phone} · {d.email}</div>
+              {d.hashtags?.length > 0 && (
+                <div className="card-meta">תגיות: {d.hashtags.map((t) => `#${t}`).join(" ")}</div>
+              )}
               <p className="my-1.5 text-[13px] text-[var(--text)]">{d.desc}</p>
               {d.rejectReason && <p className="err">סיבת דחייה: {d.rejectReason}</p>}
               <div className="mt-2 flex flex-wrap gap-2">

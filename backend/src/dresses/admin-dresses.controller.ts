@@ -56,6 +56,7 @@ export class AdminDressesController {
       query.status ?? 'pending',
       query.page ?? 1,
       query.limit ?? DEFAULT_PAGE_LIMIT,
+      query.category,
     );
   }
 

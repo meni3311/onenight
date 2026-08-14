@@ -1,4 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { DressCategory } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -11,6 +12,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { CATEGORIES } from '../dress-normalize';
 
 /**
  * Hard ceiling on page size. The client picks `limit`, so this is what stops
@@ -113,12 +115,38 @@ export class BrowseDressesDto {
   @IsString({ each: true })
   colors?: string[];
 
+  /**
+   * Matches a dress if ANY of its sizes is in this list — a dress that fits
+   * both S and M belongs in a search for either.
+   *
+   * Values are deliberately NOT whitelisted. The standard sizes arrive from
+   * the filter chips, but the panel's "אחר" option reveals a free-text field,
+   * so an arbitrary string is a legitimate value here and is matched exactly
+   * against the stored (already normalized) sizes. That field is also what
+   * finally lets a visitor filter for a numeric size — the chip list is
+   * letters only by design, see LETTER_SIZES in the frontend's
+   * filterConstants.js.
+   */
   @ApiPropertyOptional({ description: 'Comma-separated', type: String })
   @IsOptional()
   @csv()
   @IsArray()
   @IsString({ each: true })
   sizes?: string[];
+
+  /**
+   * Occasion facet, multi-select like colours and sizes. Whitelisted against
+   * the enum, unlike the free-text facets — an unknown category is a typo or
+   * a stale link, not a search term.
+   *
+   * The homepage's category tiles link here with a single value.
+   */
+  @ApiPropertyOptional({ description: 'Comma-separated', enum: CATEGORIES, isArray: true })
+  @IsOptional()
+  @csv()
+  @IsArray()
+  @IsIn(CATEGORIES, { each: true })
+  categories?: DressCategory[];
 
   @ApiPropertyOptional({ description: 'Comma-separated', type: String })
   @IsOptional()
