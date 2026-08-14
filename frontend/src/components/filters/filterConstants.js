@@ -47,6 +47,42 @@ export const EMPTY_FILTERS = {
   source: "all",
 };
 
+/* How many dresses one page of the gallery holds. Must not exceed
+   MAX_PAGE_LIMIT in the backend's browse-dresses.dto.ts, which rejects
+   anything larger; it's also the only page size the server will cache, so
+   changing it here without changing it there silently costs every cache hit. */
+export const PAGE_LIMIT = 24;
+
+/* Serialize the filter state into the browse endpoint's query string.
+
+   Anything still at its default is deliberately OMITTED rather than sent
+   explicitly. That isn't cosmetic: the server only caches requests that carry
+   no filter params at all (see browseCacheKey in dresses.service.ts), so
+   sending `minPrice=0&maxPrice=1000` on the homepage's first load — which is
+   what the untouched slider holds — would look like a filtered query and miss
+   the cache on the one request every visitor makes.
+
+   Multi-selects go over as comma-separated values, matching the DTO. */
+export function filtersToQuery(f, sort, page, limit = PAGE_LIMIT) {
+  const p = new URLSearchParams();
+
+  if (f.q) p.set("q", f.q);
+  if (f.colors.length) p.set("colors", f.colors.join(","));
+  if (f.sizes.length) p.set("sizes", f.sizes.join(","));
+  if (f.regions.length) p.set("regions", f.regions.join(","));
+  if (f.dressLengths.length) p.set("dressLengths", f.dressLengths.join(","));
+  if (f.sleeveLengths.length) p.set("sleeveLengths", f.sleeveLengths.join(","));
+  if (f.source !== "all") p.set("source", f.source);
+  if (f.minPrice > PRICE.min) p.set("minPrice", String(f.minPrice));
+  if (f.maxPrice < PRICE.max) p.set("maxPrice", String(f.maxPrice));
+  if (sort) p.set("sort", sort);
+  if (page > 1) p.set("page", String(page));
+  if (limit !== PAGE_LIMIT) p.set("limit", String(limit));
+
+  const qs = p.toString();
+  return qs ? `?${qs}` : "";
+}
+
 /* Number of filters the user has actively changed from their defaults. */
 export function activeFilterCount(f) {
   return (

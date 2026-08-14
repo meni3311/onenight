@@ -1,36 +1,37 @@
 # Verifying the dress flow really persists
 
-The code migration is done, but **none of it has been run against your Supabase
-project**. This sandbox has no network route to Supabase (DNS for
-`aws-1-ap-southeast-2.pooler.supabase.com` doesn't resolve) and no npm registry
-access, so migrations, bucket creation, `prisma generate`, and any browser test
-were all impossible here. Everything below is unverified until you run it.
+> **Infrastructure note (superseded).** This document was written against
+> Supabase Postgres + Supabase Storage. The project has since moved to **Neon
+> Postgres (EU) + Cloudflare R2**; see `MIGRATION_NEON_R2.md` for the setup
+> steps. The steps below have been updated to match, but the *test* itself is
+> unchanged and still the one that matters.
 
 Work top to bottom. Steps 1–3 are prerequisites; **step 6 is the actual
 launch-blocker test.**
 
 ---
 
-## 1. Add the service-role key
+## 1. Configure storage credentials
 
-`backend/.env` now has `SUPABASE_URL` filled in and an empty
-`SUPABASE_SERVICE_ROLE_KEY`. Paste the key from **Supabase dashboard → Project
-Settings → API → Project API keys → `service_role`**.
+`backend/.env` needs the five `R2_*` variables described in
+`backend/.env.example`. See `MIGRATION_NEON_R2.md` for where each one comes
+from in the Cloudflare dashboard.
 
-This key bypasses RLS. It belongs only in `backend/.env` — never in
+`R2_SECRET_ACCESS_KEY` belongs only in `backend/.env` — never in
 `frontend/.env`, since anything `VITE_`-prefixed is compiled into the browser
 bundle.
 
-Image upload returns 500 with `SUPABASE_SERVICE_ROLE_KEY is not set` until this
-is done.
+Image upload returns 500 with `R2_… is not set` until these are filled in.
 
-## 2. Create the Storage bucket
+## 2. Create the bucket
 
-Run `supabase/migrations/003_dress_images_bucket.sql` in the **Supabase SQL
-editor**. It creates a public `dress-images` bucket (10MB, jpeg/png/webp) with
-public read and authenticated write, and is safe to re-run.
+In the Cloudflare dashboard: **R2 → Create bucket**, named `dress-images`,
+location hint **EU**. Then **Settings → Public Development URL → Enable** (or
+attach a custom domain) and put that origin in `R2_PUBLIC_BASE_URL`.
 
-Confirm: **Storage → Buckets** shows `dress-images`, marked Public.
+The 10MB / jpeg-png-webp limits that the old bucket enforced server-side are
+enforced in `StorageService` instead — R2 has no equivalent bucket-level
+policy.
 
 ## 3. Apply the database migration
 
@@ -102,15 +103,15 @@ Now verify it went to the real backend, not the browser:
 - **Network tab**: `POST /api/dresses/images` returns `{"url": "https://…"}`
   once per photo, then `POST /api/dresses` returns 201. If you see no image
   requests, the old base64 path is somehow still live — stop and tell me.
-- **Storage → dress-images → `pending/`**: your files are there.
+- **R2 → dress-images → `pending/`**: your files are there.
 - **SQL**:
   ```sql
   select d.id, d.title, d.status, d.email, i.url
   from "Dress" d left join "DressImage" i on i."dressId" = d.id
   order by d."createdAt" desc limit 5;
   ```
-  One row per photo, each `url` an `https://…/storage/v1/object/public/dress-images/…`
-  link. **If any `url` starts with `data:` the migration failed** — that's a
+  One row per photo, each `url` starting with your `R2_PUBLIC_BASE_URL`.
+  **If any `url` starts with `data:` the migration failed** — that's a
   base64 blob and it must never reach the database.
 - Paste one of those URLs into a fresh tab: the photo loads without auth.
 
@@ -166,8 +167,10 @@ Ranked by how likely they are to bite:
 5. **Photos land in `pending/`**, because the publish form uploads before the
    dress row exists. Harmless (the URL is what's stored), but the folder name
    isn't the dress id. Worth a tidy-up pass later.
-6. **Deleting a dress doesn't delete its files.** No cleanup path exists —
-   orphaned objects will accumulate in the bucket.
+6. **Deleting a dress deletes its files best-effort.** `deleteByPublicUrl`
+   never throws, so a storage failure can't block a listing deletion — but it
+   also means the occasional orphaned object. Old Supabase Storage URLs are
+   skipped entirely, since we no longer have anything to delete them with.
 
 ## Out of scope, but I broke it and you should know
 

@@ -49,7 +49,7 @@ async function readError(res) {
 }
 
 /**
- * @param {string} path    e.g. "/api/dresses?status=all"
+ * @param {string} path    e.g. "/api/dresses?page=2&sort=price_asc"
  * @param {object} [opts]
  * @param {string} [opts.method]
  * @param {object} [opts.body]     JSON-serialized
@@ -75,6 +75,74 @@ export async function api(path, { method = "GET", body, adminPw } = {}) {
   if (!res.ok) throw await readError(res);
   if (res.status === 204) return null;
   return res.json();
+}
+
+/**
+ * One page of the public browse list.
+ *
+ * `query` is a ready-made query string from filtersToQuery — the filter state
+ * knows its own defaults and which of them are worth sending, and this layer
+ * shouldn't need to.
+ *
+ * Resolves with `{ items, total, page, limit }`. `items` carries no `phone`,
+ * `email` or `photos`: the browse response is public, so contact details come
+ * only from getDress() when a listing is actually opened.
+ *
+ * There is no way to ask this for pending or rejected listings. It used to
+ * take `?status=all` and this app called it that way, which sent the whole
+ * moderation queue to every visitor. The queue is getAdminDresses() now.
+ */
+export function browseDresses(query = "") {
+  return api(`/api/dresses${query}`);
+}
+
+/**
+ * One listing in full, contact details included. The card in the grid no
+ * longer carries `phone`, so the detail view fetches this on open — the
+ * WhatsApp CTA and the booking-inquiry log both need it.
+ */
+export function getDress(dressId) {
+  return api(`/api/dresses/${encodeURIComponent(dressId)}`);
+}
+
+/**
+ * Approved listings by id, in the order asked for. Backs the favourites page,
+ * which holds ids in localStorage and used to resolve them against the full
+ * catalogue the browse call returned. Ids that are unknown — or no longer
+ * approved — are absent from the response rather than an error.
+ */
+export function getDressesByIds(ids) {
+  if (!ids.length) return Promise.resolve([]);
+  return api(`/api/dresses/by-ids?ids=${encodeURIComponent(ids.join(","))}`);
+}
+
+/** The "you may also like" rail. Approved only, excludes the listing itself. */
+export function getSimilarDresses(dressId, limit = 6) {
+  return api(`/api/dresses/${encodeURIComponent(dressId)}/similar?limit=${limit}`);
+}
+
+/**
+ * An owner's own listings, pending and rejected included, for the account
+ * screen. The email is the ownership proof, the same weak rule deleteDress
+ * uses — see the backend for why that's the strongest check available here.
+ */
+export function getMyDresses(email) {
+  if (!email) return Promise.resolve([]);
+  return api(`/api/dresses/mine?email=${encodeURIComponent(email)}`);
+}
+
+/**
+ * The admin moderation queue. Password-gated server-side (AdminGuard), unlike
+ * the arrangement this replaces, where the admin screen filtered a queue that
+ * had already been sent to every anonymous visitor.
+ *
+ * Resolves with `{ items, total, page, limit, counts }`, where `counts` holds
+ * every status regardless of which one was requested — the tab badges read it.
+ */
+export function getAdminDresses(status, adminPw, page = 1) {
+  return api(`/api/admin/dresses?status=${encodeURIComponent(status)}&page=${page}`, {
+    adminPw,
+  });
 }
 
 /**

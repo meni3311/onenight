@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { placeholder } from "../lib/data.js";
-import { api, withBase } from "../lib/api.js";
+import { api, getAdminDresses, getDress, withBase } from "../lib/api.js";
 import { AdminPhotosPanel } from "../components/admin/AdminPhotosPanel.jsx";
 import { useSessionStorage } from "../hooks/useSessionStorage.js";
 
@@ -28,7 +28,7 @@ const fmtDateTime = (iso) => new Date(iso).toLocaleString("he-IL", { dateStyle: 
 const fmtDate = (iso) => new Date(iso).toLocaleDateString("he-IL");
 
 /* Owner-only moderation panel: approve / reject submitted dresses. */
-export default function AdminPage({ dresses, setDresses, toast, dressById, onOpen }) {
+export default function AdminPage({ toast, onOpen }) {
   /* The admin "session" is the password itself — AdminGuard re-checks it on
      every privileged call and no token is ever issued (see admin.guard.ts),
      so there is nothing else to persist. Held in sessionStorage rather than
@@ -51,6 +51,20 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
   // Dress id whose AI photo / manage-images panel is open.
   const [aiImagining, setAiImagining] = useState(null);
 
+  /* The moderation queue, fetched from the guarded endpoint with the stored
+     password.
+
+     It used to be handed down from App, which had fetched it with
+     `?status=all` on an endpoint with no authentication at all — so the queue
+     was sent to every anonymous visitor and this screen merely chose not to
+     draw it. The password gates the data now, not the rendering.
+
+     `counts` comes back with every status regardless of which tab is open, so
+     the badges don't need the other tabs loaded. */
+  const [dresses, setDresses] = useState([]);
+  const [counts, setCounts] = useState({ pending: 0, approved: 0, rejected: 0 });
+  const [queueLoading, setQueueLoading] = useState(false);
+
   // Booking inquiries ("להזמנה" click log) — lazily loaded from the real
   // backend the first (and every subsequent) time this tab is opened, so
   // the list stays fresh across admin sessions without a manual refresh button.
@@ -72,6 +86,29 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
 
   useEffect(() => {
     if (tab === "inquiries" && authed) loadInquiries();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, authed]);
+
+  /* Reload the queue whenever the tab changes — each status is its own
+     request now rather than a filter over one big array. Approve/reject
+     update the loaded rows in place, so this doesn't refire on a moderation
+     decision and pull the row out from under the admin mid-click. */
+  const loadQueue = async (status) => {
+    setQueueLoading(true);
+    try {
+      const res = await getAdminDresses(status, pw);
+      setDresses(res?.items || []);
+      if (res?.counts) setCounts(res.counts);
+    } catch (e) {
+      toast("טעינת המודעות נכשלה: " + e.message);
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!authed || tab === "inquiries") return;
+    loadQueue(tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, authed]);
 
@@ -147,19 +184,31 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
     </div>
   );
 
-  const filtered = dresses.filter((d) => d.status === tab);
+  /* No client-side status filter: the request was already scoped to this
+     tab's status. */
+  const filtered = dresses;
+
+  /* A moderation decision moves the listing to a different tab, so it leaves
+     the loaded list and the badges are adjusted locally rather than by
+     refetching — the admin is usually working down a queue and a refetch
+     would reorder it underneath them. */
+  const applyDecision = (id, from, to) => {
+    setDresses((p) => p.filter((x) => x.id !== id));
+    setCounts((c) => ({ ...c, [from]: Math.max(0, (c[from] || 0) - 1), [to]: (c[to] || 0) + 1 }));
+  };
+
   const approve = async (d) => {
     try {
-      const up = await api("/api/dresses/" + d.id + "/status", { method: "PATCH", adminPw: pw, body: { status: "approved" } });
-      setDresses((p) => p.map((x) => (x.id === d.id ? up : x)));
+      await api("/api/dresses/" + d.id + "/status", { method: "PATCH", adminPw: pw, body: { status: "approved" } });
+      applyDecision(d.id, d.status, "approved");
       toast("השמלה אושרה ✓ — נשלח מייל למפרסמת");
       sendEmail("approve", d);
     } catch (e) { toast("אישור נכשל: " + e.message); }
   };
   const doReject = async () => {
     try {
-      const up = await api("/api/dresses/" + rejecting.id + "/status", { method: "PATCH", adminPw: pw, body: { status: "rejected", rejectReason: reason } });
-      setDresses((p) => p.map((x) => (x.id === rejecting.id ? up : x)));
+      await api("/api/dresses/" + rejecting.id + "/status", { method: "PATCH", adminPw: pw, body: { status: "rejected", rejectReason: reason } });
+      applyDecision(rejecting.id, rejecting.status, "rejected");
       sendEmail("reject", { ...rejecting, rejectReason: reason });
       toast("השמלה נדחתה — נשלח מייל למפרסמת");
       setRejecting(null); setReason("");
@@ -168,6 +217,22 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
 
   const toggleAiImagining = (d) => {
     setAiImagining((p) => (p === d.id ? null : d.id));
+  };
+
+  /* An inquiry row keeps its own snapshot of the listing (title, both phone
+     numbers) precisely so it outlives the dress — see the note on
+     deleteDress. Only "view the dress" needs the live record, and it used to
+     be looked up in the app-wide array, which meant the button silently read
+     "השמלה כבר לא זמינה" for any listing that merely wasn't loaded. Fetched
+     on click instead, so a missing dress is an actual 404 rather than a
+     guess from what happens to be in memory. */
+  const openInquiryDress = async (dressId) => {
+    try {
+      const dress = await getDress(dressId);
+      onOpen && onOpen(dress);
+    } catch {
+      toast("השמלה כבר לא זמינה");
+    }
   };
 
   return (
@@ -181,7 +246,7 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
       <div className="tabs">
         {TABS.map(([k, l]) => (
           <button key={k} className={"tab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>
-            {l} ({dresses.filter((d) => d.status === k).length})
+            {l} ({counts[k] ?? 0})
           </button>
         ))}
         <button className={"tab" + (tab === "inquiries" ? " on" : "")} onClick={() => setTab("inquiries")}>
@@ -194,7 +259,6 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
           {inquiriesLoading && <div className="empty">טוען בקשות…</div>}
           {!inquiriesLoading && inquiries.length === 0 && <div className="empty">אין בקשות הזמנה עדיין.</div>}
           {!inquiriesLoading && inquiries.map((inq) => {
-            const dress = dressById && dressById(inq.dressId);
             return (
               <div key={inq.id} className="admin-row">
                 <div className="flex-1">
@@ -212,11 +276,9 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
                     <a className="btn btn-ghost" href={waLink(inq.ownerPhone)} target="_blank" rel="noopener">
                       📱 מפרסמת: {inq.ownerPhone}
                     </a>
-                    {dress ? (
-                      <button className="btn btn-ghost" onClick={() => onOpen && onOpen(dress)}>👗 צפייה בשמלה</button>
-                    ) : (
-                      <span className="card-meta">השמלה כבר לא זמינה</span>
-                    )}
+                    <button className="btn btn-ghost" onClick={() => openInquiryDress(inq.dressId)}>
+                      👗 צפייה בשמלה
+                    </button>
                     <button className="btn btn-rose" onClick={() => deleteInquiry(inq.id)}>🗑️ מחיקה</button>
                   </div>
                 </div>
@@ -226,8 +288,9 @@ export default function AdminPage({ dresses, setDresses, toast, dressById, onOpe
         </>
       ) : (
       <>
-      {filtered.length === 0 && <div className="empty">אין שמלות בקטגוריה זו.</div>}
-      {filtered.map((d) => {
+      {queueLoading && <div className="empty">טוען מודעות…</div>}
+      {!queueLoading && filtered.length === 0 && <div className="empty">אין שמלות בקטגוריה זו.</div>}
+      {!queueLoading && filtered.map((d) => {
         const wa = `https://wa.me/972${d.phone.replace(/^0/, "")}?text=${encodeURIComponent('היי, קיבלנו את המודעה שלך לשמלה ' + d.title + '. התמונה שצירפת לא ברורה מספיק — תשמחי לשלוח תמונה טובה יותר? 🙏')}`;
         return (
           <div key={d.id} className="admin-row">

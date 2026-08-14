@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { Img } from "../components/ui/Img.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock.js";
-import { withBase } from "../lib/api.js";
+import { getDress, getSimilarDresses, withBase } from "../lib/api.js";
 
 /* ============================================================================
    ProductPage — full dedicated dress page (mobile-first, RTL).
@@ -10,14 +10,21 @@ import { withBase } from "../lib/api.js";
    full-bleed gallery, editorial identity block, size + date selection,
    accordion details, reviews rail, similar dresses, sticky booking CTA.
 
-   Props (same shape App already passes for the old modal, plus optional rail):
-     d              — the dress object
+   Props:
+     d              — the card that was clicked. A browse-list dress, which is
+                      deliberately incomplete: the public list carries no
+                      `phone`, so this page fetches the full record itself and
+                      renders from the card meanwhile (see `detail` below).
      fav            — is this dress favorited
      onFav(id)      — toggle favorite
      onClose()      — back to the dress grid
      toast(msg)     — transient toast
-     similar        — (optional) other dresses for the "you may also like" rail
      onOpenSimilar  — (optional) open another dress
+
+   The "you may also like" rail used to arrive as a `similar` prop, filtered
+   by App out of the full catalogue it held in memory. That catalogue is gone,
+   so the rail comes from /api/dresses/:id/similar — an endpoint that already
+   existed and had never been called.
 ============================================================================ */
 
 /* ---- design tokens straight from the brief ---- */
@@ -192,8 +199,15 @@ function AccordionRow({ title, children, open, onToggle }) {
 }
 
 /* ============================================================== ProductPage */
-export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [], onOpenSimilar }) {
+export default function ProductPage({ d: summary, fav, onFav, onClose, toast, onOpenSimilar }) {
   const { isLoggedIn, account, openAuth } = useAuth();
+  /* The full record and the rail, both fetched on open. `detail` starts null
+     and the page renders from the clicked card until it lands, so opening a
+     dress still paints immediately — the only thing missing in that window is
+     the owner's phone, which is needed at the very end of the flow (pick a
+     size, pick dates, then book) rather than on arrival. */
+  const [detail, setDetail] = useState(null);
+  const [similar, setSimilar] = useState([]);
   const [size, setSize] = useState(null);
   const [range, setRange] = useState({ start: null, end: null });
   const [openAcc, setOpenAcc] = useState(0);
@@ -213,7 +227,32 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
      dropped. */
   useBodyScrollLock(true);
 
-  useEffect(() => { window.scrollTo?.({ top: 0 }); }, [d?.id]);
+  useEffect(() => { window.scrollTo?.({ top: 0 }); }, [summary?.id]);
+
+  /* Keyed on the id, so opening another dress from the rail refetches rather
+     than showing the previous one's contact details or suggestions. Both
+     failures are quiet: a missing rail is invisible, and a missing detail
+     leaves the card's own data on screen — book() below is what refuses to
+     proceed without a phone number. */
+  useEffect(() => {
+    const id = summary?.id;
+    if (!id) return;
+    let cancelled = false;
+    setDetail(null);
+    setSimilar([]);
+    getDress(id)
+      .then((full) => { if (!cancelled) setDetail(full); })
+      .catch(() => {});
+    getSimilarDresses(id, 6)
+      .then((rows) => { if (!cancelled) setSimilar(rows || []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [summary?.id]);
+
+  /* One object for the render: the fetched record once it's here, the clicked
+     card until then. Same field names either way — the public list is the
+     full shape minus the contact details. */
+  const d = detail || summary;
 
   if (!d) return null;
 
@@ -278,6 +317,14 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
     if (!canBook) return;
     if (!isLoggedIn) {
       setAuthPrompt(true);
+      return;
+    }
+    /* The owner's number isn't on the browse card — it comes with the detail
+       fetch above. Reaching here without it means that request hasn't landed
+       (or failed), and continuing would open WhatsApp on a malformed number
+       and log an inquiry the admin can't act on. */
+    if (!d.phone) {
+      toast && toast("רגע, טוענים את פרטי המודעה…");
       return;
     }
     logBookingInquiry();

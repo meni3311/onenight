@@ -5,7 +5,7 @@ import { Injectable, Logger } from '@nestjs/common';
  * photo of a person wearing it.
  *
  * Provider is FASHN's own API (api.fashn.ai), called over plain REST with
- * `fetch` — same reason StorageService talks to Supabase Storage that way.
+ * `fetch` — two endpoints don't justify pulling in a client library.
  *
  * WHY product-to-model AND NOT VIRTUAL TRY-ON: try-on endpoints are two-input
  * (a garment plus a photo of the person to dress it on), which meant keeping a

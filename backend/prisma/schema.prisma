@@ -1,9 +1,26 @@
 // Prisma schema for the onenight dress-rental marketplace.
-// Database: Supabase (PostgreSQL).
-//   DATABASE_URL  — pooled connection (PgBouncer, port 6543) used at runtime
-//   DIRECT_URL    — direct connection (port 5432) used for migrations
+// Database: Neon (PostgreSQL), EU region.
+//   DATABASE_URL  — pooled connection (the `-pooler` host) used at runtime
+//   DIRECT_URL    — direct connection (same host without `-pooler`), used for
+//                   migrations, which need a session Postgres can't give you
+//                   through a transaction pooler
 generator client {
   provider = "prisma-client-js"
+  // relationJoins lets a read pass `relationLoadStrategy: "join"`, which loads
+  // `include`d relations with a LATERAL join in the same statement instead of
+  // issuing one follow-up query per relation.
+  //
+  // Every dress read includes two relations (images, availability — see
+  // CLIENT_INCLUDE), so the default strategy costs three round trips where one
+  // would do. That is irrelevant against a local database and dominant against
+  // a distant one: on the old ap-southeast-2 instance a single round trip cost
+  // ~1.8s and endpoint latency tracked the number of queries almost exactly.
+  // The move to an EU region cut the per-trip cost, which makes this less
+  // dramatic but no less correct — one query still beats three.
+  //
+  // Preview feature in Prisma 5 — `npx prisma generate` must be re-run after
+  // changing this line, or the client won't accept the option.
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {
@@ -123,6 +140,12 @@ model Dress {
   // filtering would key on, and `email` backs listing-ownership lookups.
   @@index([email])
   @@index([region])
+  // Backs the paginated browse query, which is always `WHERE status = ?
+  // ORDER BY createdAt DESC` with an OFFSET. Composite and in that order on
+  // purpose: status is the equality predicate, so it has to come first for
+  // createdAt to still serve the sort — a plain @@index([status]) would
+  // filter but leave a sort of the whole matching set on every page.
+  @@index([status, createdAt])
 }
 
 model DressSize {

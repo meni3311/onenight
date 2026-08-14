@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../../context/AuthContext.jsx";
+import { getMyDresses } from "../../lib/api.js";
 import { useLocalStorage } from "../../hooks/useLocalStorage.js";
 import { Icon } from "./Icon.jsx";
 
@@ -20,15 +21,34 @@ const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // once every 7 days
    Mounted only from HomePage.jsx (route === "home"), so it structurally
    can't appear on the publish page or anywhere else — no extra
    route-matching logic needed here. */
-export function PublishPromoPopup({ dresses = [] }) {
+export function PublishPromoPopup() {
   const { isLoggedIn, account, requestPublish } = useAuth();
   const [dismissedAt, setDismissedAt] = useLocalStorage("onenight_publish_promo_dismissed_at", 0);
   const [visible, setVisible] = useState(false);
 
-  const hasActiveListing =
-    isLoggedIn &&
-    !!account?.email &&
-    dresses.some((d) => (d.email || "").trim().toLowerCase() === account.email.trim().toLowerCase());
+  /* "Does this account already have a listing" used to be answered by
+     scanning the browse array, which held every dress at every status. The
+     browse list is one page of approved listings now, so that scan would
+     miss anyone whose only listing is still pending — exactly the person who
+     least needs to be nagged into publishing — and anyone whose listing sits
+     on a later page. Asked of the owner endpoint instead.
+
+     Starts null (unknown) rather than false so the popup can't fire during
+     the round trip; the timer below waits for a definite answer. */
+  const [hasListing, setHasListing] = useState(null);
+
+  useEffect(() => {
+    if (!isLoggedIn || !account?.email) { setHasListing(false); return; }
+    let cancelled = false;
+    getMyDresses(account.email)
+      .then((rows) => { if (!cancelled) setHasListing((rows || []).length > 0); })
+      // A failed lookup shouldn't produce a popup for someone who has already
+      // listed — stay quiet rather than guess.
+      .catch(() => { if (!cancelled) setHasListing(true); });
+    return () => { cancelled = true; };
+  }, [isLoggedIn, account?.email]);
+
+  const hasActiveListing = hasListing !== false;
 
   const withinCooldown = Date.now() - dismissedAt < COOLDOWN_MS;
   const eligible = !hasActiveListing && !withinCooldown;
