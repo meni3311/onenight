@@ -1,7 +1,8 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { connect as tlsConnect } from 'tls';
+import { connect as netConnect } from 'net';
 import { lookup } from 'dns';
+import { PrismaClient } from '@prisma/client';
 import { AdminGuard } from './admin.guard';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -56,16 +57,71 @@ export class DbDiagnosticsController {
     return new Promise((res, rej) => lookup(host, (err) => (err ? rej(err) : res())));
   }
 
-  /** Raw TCP + TLS handshake, then immediately close. No Postgres traffic. */
-  private tlsHandshake(host: string, port: number): Promise<void> {
+  /**
+   * Raw TCP connect, then immediately close. No TLS, no Postgres protocol.
+   *
+   * This was a TLS handshake in the first version, which was a mistake:
+   * Postgres doesn't do implicit TLS on its port — it expects a plaintext
+   * SSLRequest first — so every handshake failed and the numbers came back
+   * negative. A bare TCP connect measures the thing that was actually wanted
+   * (how long it takes to open a socket to the database, and whether opening
+   * several at once serializes) without a protocol mismatch in the way.
+   */
+  private tcpConnect(host: string, port: number): Promise<void> {
     return new Promise((res, rej) => {
-      const sock = tlsConnect(
-        { host, port, servername: host, rejectUnauthorized: false },
-        () => { sock.destroy(); res(); },
-      );
+      const sock = netConnect({ host, port }, () => { sock.destroy(); res(); });
       sock.setTimeout(15000, () => { sock.destroy(); rej(new Error('timeout')); });
       sock.on('error', (e) => { sock.destroy(); rej(e); });
     });
+  }
+
+  /**
+   * Force an explicit pool size onto a connection string, so the same endpoint
+   * can be measured with the app's own setting and with a known one.
+   */
+  private withLimit(rawUrl: string, limit: number): string {
+    const u = new URL(rawUrl);
+    u.searchParams.set('connection_limit', String(limit));
+    u.searchParams.set('pool_timeout', '20');
+    return u.toString();
+  }
+
+  /**
+   * Time one `SELECT 1` three times over, then eight at once, on a client of
+   * this diagnostic's own making.
+   *
+   * A separate PrismaClient per variant is the only way to compare connection
+   * strings without restarting the process — the injected PrismaService is
+   * bound to DATABASE_URL for the lifetime of the app. Each one is disconnected
+   * in a finally, because a leaked pool here would quietly consume the very
+   * connection budget being measured.
+   */
+  private async profile(url: string): Promise<Record<string, unknown>> {
+    let client: PrismaClient | null = null;
+    try {
+      client = new PrismaClient({ datasources: { db: { url } } });
+      const q = () => client!.$queryRaw`SELECT 1`;
+      await q(); // warm: don't charge the first call for pool construction
+
+      const sequentialMs: number[] = [];
+      for (let i = 0; i < 3; i++) sequentialMs.push(Math.round(await this.time(q)));
+
+      const t = process.hrtime.bigint();
+      await Promise.all(Array.from({ length: 8 }, () => this.time(q)));
+      const parallel8Ms = Math.round(this.ms(t));
+
+      const median = [...sequentialMs].sort((a, b) => a - b)[1];
+      return {
+        sequentialMs,
+        parallel8Ms,
+        ratio: median > 0 ? +(parallel8Ms / median).toFixed(2) : null,
+        verdict: median > 0 && parallel8Ms / median < 2.5 ? 'concurrent' : 'SERIALIZED',
+      };
+    } catch (e) {
+      return { error: (e as Error).message.split('\n')[0] };
+    } finally {
+      await client?.$disconnect().catch(() => undefined);
+    }
   }
 
   @Get()
@@ -94,8 +150,8 @@ export class DbDiagnosticsController {
 
     const dnsSeq = await seq(4, () => this.dnsLookup(host));
     const dnsPar = await par(8, () => this.dnsLookup(host));
-    const tlsSeq = await seq(3, () => this.tlsHandshake(host, port));
-    const tlsPar = await par(8, () => this.tlsHandshake(host, port));
+    const tcpSeq = await seq(3, () => this.tcpConnect(host, port));
+    const tcpPar = await par(8, () => this.tcpConnect(host, port));
     const prismaSeq = await seq(3, q);
     const prismaPar = await par(8, q);
 
@@ -104,18 +160,39 @@ export class DbDiagnosticsController {
       return median > 0 ? +(parallel / median).toFixed(2) : null;
     };
 
+    const direct = process.env.DIRECT_URL;
+
     return {
       target: { host, port, note: 'credentials never read' },
       // A ratio near 1 means eight concurrent operations overlapped.
       // A ratio near 8 means they ran one after another.
       dns: { sequentialMs: dnsSeq, parallel8Ms: dnsPar, ratio: ratio(dnsPar, dnsSeq) },
-      tls: { sequentialMs: tlsSeq, parallel8Ms: tlsPar, ratio: ratio(tlsPar, tlsSeq) },
-      prisma: { sequentialMs: prismaSeq, parallel8Ms: prismaPar, ratio: ratio(prismaPar, prismaSeq) },
+      tcp: { sequentialMs: tcpSeq, parallel8Ms: tcpPar, ratio: ratio(tcpPar, tcpSeq) },
+
+      // The app's own client, exactly as configured.
+      appClient: {
+        sequentialMs: prismaSeq,
+        parallel8Ms: prismaPar,
+        ratio: ratio(prismaPar, prismaSeq),
+        verdict: ratio(prismaPar, prismaSeq)! < 2.5 ? 'concurrent' : 'SERIALIZED',
+      },
+
+      // Same endpoint, same credentials, different pool settings — isolates
+      // "the pooler won't do concurrency" from "our pool is sized at one".
+      variants: {
+        pooledAsConfigured: await this.profile(process.env.DATABASE_URL || ''),
+        pooledLimit10: await this.profile(this.withLimit(process.env.DATABASE_URL || '', 10)),
+        directAsConfigured: direct ? await this.profile(direct) : { skipped: 'DIRECT_URL unset' },
+        directLimit10: direct ? await this.profile(this.withLimit(direct, 10)) : { skipped: 'DIRECT_URL unset' },
+      },
+
       reading: {
-        'tls ratio ~8': 'the machine/network serializes connections — look at antivirus TLS inspection, a proxy, or a VPN, not at Prisma',
-        'tls ratio ~1 but prisma ratio ~8': 'the driver layer serializes — pool config or the Supabase pooler',
-        'tls sequential ~1800ms': 'each new connection is genuinely that expensive — distance plus handshake; connection reuse is the fix',
-        'tls sequential ~300ms': 'the network is fine and something is opening a fresh connection per query',
+        'tcp ratio ~8': 'the machine or network serializes connections — antivirus TLS inspection, a proxy, or a VPN, not the database',
+        'tcp ratio ~1, every variant SERIALIZED': 'the driver serializes regardless of pool size — look above Prisma',
+        'pooledLimit10 concurrent, pooledAsConfigured SERIALIZED': 'the connection string is missing connection_limit; add it',
+        'direct concurrent, pooled SERIALIZED': 'the pooled endpoint is the constraint — use the direct one for this long-lived server',
+        'query time < tcp connect time': 'connections are being reused, which is what we want',
+        'query time ≈ tcp connect time or more': 'a fresh connection is being opened per query',
       },
     };
   }
