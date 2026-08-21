@@ -43,6 +43,15 @@ export function ProductGrid({ dresses, favIds, onFav, onOpen, emptyAction }) {
       {dresses.map((d, i) => (
         <motion.div
           key={d.id}
+          /* min-w-0: a grid item's default min-width is `auto` (its
+             content's min-content size), not 0. On a 2-up mobile row that
+             lets one card's content — the size/city line is the usual
+             culprit — force its column wider than a fixed 1fr share,
+             shrinking the sibling column to compensate and leaving the two
+             cards visibly unequal widths. min-w-0 removes that content-based
+             floor so both columns hold their equal 1fr share regardless of
+             what's inside. */
+          className="min-w-0"
           initial={cardReveal.initial}
           whileInView={cardReveal.whileInView}
           viewport={cardReveal.viewport}

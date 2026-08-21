@@ -3,9 +3,12 @@ import { Icon } from "../ui/Icon.jsx";
 import { useScrolled } from "../../hooks/useScrolled.js";
 import { useBodyScrollLock } from "../../hooks/useBodyScrollLock.js";
 import { useAuth } from "../../context/AuthContext.jsx";
+import { LOGO_URL } from "../../constants/theme.js";
 
-/* Bordeaux tone shared by the navbar's User + Menu icons and the wordmark. */
-const BORDEAUX = "#6B2D2D";
+/* Very dark bordeaux for the navbar's User + hamburger icons — noticeably
+   deeper than the site's standard bordeaux (COLORS.bordeaux / --rose-deep,
+   #6B2D2D), which read as too light against the translucent header. */
+const BORDEAUX = "#401B1B";
 
 /* Glassmorphism dropdown anchored under the User icon — same frosted-dark
    family as the auth modal, with a slightly denser fill and a softer,
@@ -216,23 +219,36 @@ export function SiteHeader({ go, goAccount }) {
             )}
           </div>
 
-          {/* CENTER — wordmark + tagline, absolutely centered */}
+          {/* CENTER — logo, absolutely centered. Replaces the old text
+              wordmark; the image is the brand mark now, so it carries the
+              alt text on its own rather than needing a caption. */}
           <button
             type="button"
             onClick={() => navigate(() => { go("home"); window.scrollTo({ top: 0, behavior: "smooth" }); })}
             title="onenight — דף הבית"
             className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center leading-none focus:outline-none"
           >
-            <span
-              dir="ltr"
-              className="font-display text-[26px] font-medium italic tracking-tight"
-              style={{ color: BORDEAUX }}
-            >
-              oneNight
-            </span>
-            <span className="mt-0.5 font-body text-[11px] font-medium tracking-[0.22em] text-muted" style={{ color: BORDEAUX }}>
-              השכרת שמלות ערב
-            </span>
+            <img
+              src={LOGO_URL}
+              alt="onenight"
+              /* Above-the-fold and centered in the sticky header — treat it
+                 like the LCP element the same way Img.jsx's `priority` flag
+                 does for the first row of dress cards. */
+              loading="eager"
+              decoding="sync"
+              fetchpriority="high"
+              /* Grows slightly on hover/focus — imperative onMouseEnter/Leave
+                 rather than a CSS :hover class, matching how hover states are
+                 done elsewhere in this file (e.g. UserMenu above), since this
+                 is a plain inline style object with no stylesheet rule of its
+                 own. transformOrigin keeps the growth centered instead of
+                 drifting toward one corner. */
+              style={{ flexShrink: 0, width: 200, zIndex: 10, transform: "scale(1)", transformOrigin: "center", transition: "transform 0.25s ease" }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.08)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+              onFocus={(e) => { e.currentTarget.style.transform = "scale(1.08)"; }}
+              onBlur={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+            />
           </button>
 
           {/* RIGHT — hamburger opens the side menu */}

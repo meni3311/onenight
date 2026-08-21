@@ -59,3 +59,11 @@ export const EASE_LUX = [0.16, 1, 0.3, 1];
 
 /* ---------- Default color the publish form stamps onto new dresses ---------- */
 export const DEFAULT_DRESS_COLOR_HEX = COLORS.rose;
+
+/* ---------- Site logo ----------
+   Static brand asset in the same R2 bucket that holds listing photos
+   (R2_PUBLIC_BASE_URL), so it's a plain absolute URL rather than something
+   that needs an env var on the frontend — unlike dress photos, this file
+   never changes without a code change anyway. */
+export const LOGO_URL =
+  "https://pub-7565beea7b9f4f4788f6e228f554f8f7.r2.dev/files/logo-onenight.png";
