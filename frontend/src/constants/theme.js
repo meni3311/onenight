@@ -1,7 +1,7 @@
 /* ============================================================
    Design tokens — single source of truth for hardcoded values.
    Reference these instead of inlining raw hex / rgba / font strings.
-   Tailwind's own palette lives in index.html; this file covers the
+   Tailwind's own palette lives in tailwind.config.js; this file covers the
    computed / dynamic styles that can't be expressed as static classes.
    ============================================================ */
 

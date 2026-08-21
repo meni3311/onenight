@@ -1,3 +1,11 @@
+/* MUST be the first import in the process.
+   It reads backend/.env into process.env as a side effect. Until now the only
+   thing doing that was `@prisma/client`, incidentally, while resolving its own
+   datasource — so several module-scope constants (AdminGuard's ADMIN_PASSWORD
+   among them) were reading configuration whose availability depended on where
+   the Prisma import happened to land in the module graph. This makes it
+   explicit and ordered. See the header of load-env.ts. */
+import './common/load-env';
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
@@ -7,15 +15,11 @@ import { AppModule } from './app.module';
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
 
-  // Every controller used to carry its own literal 'api/' segment in its
-  // @Controller() decorator (there was no global prefix at all). Now there
-  // is one, and those per-controller prefixes were removed to match — see
-  // each controller's @Controller() decorator — so every route still
-  // resolves to the exact same path as before (e.g. /api/dresses,
-  // /api/health), just assembled by Nest once instead of hand-repeated in
-  // seven files. Nothing needs excluding: ServeStaticModule (which serves
-  // the frontend build) defaults `useGlobalPrefix` to false, so it keeps
-  // serving unprefixed at "/" regardless — see app.module.ts.
+  // Assembled once here rather than repeated in every @Controller() —
+  // routes resolve to /api/dresses, /api/health and so on. Nothing needs
+  // excluding: ServeStaticModule (which serves the frontend build) defaults
+  // `useGlobalPrefix` to false, so it keeps serving unprefixed at "/"
+  // regardless — see app.module.ts.
   app.setGlobalPrefix('api');
 
   // CORS: locked to the deployed frontend's origin in production via
@@ -41,7 +45,7 @@ async function bootstrap(): Promise<void> {
   );
 
   // Listing photos are uploaded as multipart to POST /dresses/images (handled
-  // by multer) and stored in Supabase Storage, so JSON bodies now only ever
+  // by multer) and stored in Cloudflare R2, so JSON bodies now only ever
   // carry the resulting URLs — no need for the old 12mb base64 allowance.
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const express = require('express');

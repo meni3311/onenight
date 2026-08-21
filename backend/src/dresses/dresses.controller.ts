@@ -17,8 +17,9 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AdminGuard } from '../common/admin.guard';
-import { DressesService, ClientDress } from './dresses.service';
+import { DressesService, ClientDress, Page, PublicDress } from './dresses.service';
 import { StorageService, UploadedImage } from './storage.service';
+import { BrowseDressesDto, DressIdsDto } from './dto/browse-dresses.dto';
 import { CreateDressDto } from './dto/create-dress.dto';
 import { UpdateDressDto } from './dto/update-dress.dto';
 import { ToggleBookedDateDto, UpdateDressStatusDto } from './dto/dress-admin.dto';
@@ -35,12 +36,42 @@ export class DressesController {
     private readonly storage: StorageService,
   ) {}
 
+  /**
+   * The public browse list. Approved listings only, one page at a time,
+   * filtered and sorted server-side, without owner contact details.
+   *
+   * No parameter reaches a non-approved listing from here; the moderation
+   * queue lives behind AdminGuard on AdminDressesController. `status` is
+   * accepted and ignored so a stale client can't 400 — see
+   * BrowseDressesDto.
+   */
   @Get()
-  @ApiOperation({ summary: 'List dresses — ?status=approved (default) | pending | rejected | all' })
-  listDresses(
-    @Query('status', new DefaultValuePipe('approved')) status: string,
-  ): Promise<ClientDress[]> {
-    return this.service.listDresses(status);
+  @ApiOperation({ summary: 'Browse approved dresses — paginated, filtered, sorted' })
+  listDresses(@Query() query: BrowseDressesDto): Promise<Page<PublicDress>> {
+    return this.service.listPublic(query);
+  }
+
+  /**
+   * Resolve favourited ids to listings. Declared before `:id` for the same
+   * reason "images" is — Nest matches in declaration order, and otherwise
+   * "by-ids" would be read as a dress id.
+   */
+  @Get('by-ids')
+  @ApiOperation({ summary: 'Approved dresses by id, in the order requested' })
+  listByIds(@Query() query: DressIdsDto): Promise<PublicDress[]> {
+    return this.service.listPublicByIds(query.ids ?? []);
+  }
+
+  /**
+   * An owner's own listings, pending and rejected included, for the account
+   * screen. Ownership is an email match — the same weak rule the delete
+   * endpoint below uses, and the strongest one available until this app has
+   * real sessions. See DressesService.listByOwner.
+   */
+  @Get('mine')
+  @ApiOperation({ summary: "An owner's own listings, by email" })
+  listMine(@Query('email') email: string): Promise<ClientDress[]> {
+    return this.service.listByOwner(email);
   }
 
   /**
@@ -49,7 +80,7 @@ export class DressesController {
    * "images" would be captured as a dress id.
    */
   @Post('images')
-  @ApiOperation({ summary: 'Upload a listing photo to Supabase Storage' })
+  @ApiOperation({ summary: 'Upload a listing photo to Cloudflare R2' })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file'))
   async uploadImage(
@@ -132,7 +163,7 @@ export class DressesController {
   getSimilarDresses(
     @Param('id') id: string,
     @Query('limit', new DefaultValuePipe(4), ParseIntPipe) limit: number,
-  ): Promise<ClientDress[]> {
+  ): Promise<PublicDress[]> {
     return this.service.getSimilarDresses(id, limit);
   }
 }

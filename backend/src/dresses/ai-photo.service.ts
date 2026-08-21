@@ -5,21 +5,23 @@ import { Injectable, Logger } from '@nestjs/common';
  * photo of a person wearing it.
  *
  * Provider is FASHN's own API (api.fashn.ai), called over plain REST with
- * `fetch` — same reason StorageService talks to Supabase Storage that way.
+ * `fetch` — two endpoints don't justify pulling in a client library.
  *
  * WHY product-to-model AND NOT VIRTUAL TRY-ON: try-on endpoints are two-input
  * (a garment plus a photo of the person to dress it on), which meant keeping a
  * fixed model photo around and every listing coming back on the same body.
  * `product-to-model` is single-input — it generates the person as well as the
- * photo — so a dress photo plus a text prompt is the whole request. Who
- * appears and how the shot is framed is steered entirely by
- * DEFAULT_STUDIO_PROMPT (overridable via FASHN_STUDIO_PROMPT); for tighter
- * control the endpoint also takes `face_reference`, which is not wired up.
+ * photo — so a dress photo, a short prompt, a seed and a backdrop reference are
+ * the whole request. For tighter control the endpoint also takes
+ * `face_reference`, which is not wired up.
  *
  * EVERYTHING PROVIDER-SPECIFIC LIVES IN THIS FILE. The controller and the
- * admin UI only ever see `generateModelPhoto(garmentImageUrl) -> url`, so
- * swapping FASHN for another provider is a one-file change. Keep it that way:
- * no FASHN-shaped types leak out of this module.
+ * admin UI only ever see
+ * `generateModelPhoto(garmentImageUrl, dressId) -> url`, so swapping FASHN for
+ * another provider is a one-file change. Keep it that way: no FASHN-shaped
+ * types leak out of this module. `dressId` is passed in rather than derived
+ * because it is the seed of the per-dress art direction (see directionFor);
+ * it is an opaque string to this file, not a database concern.
  *
  * Env:
  *   FASHN_API_KEY     Key from https://app.fashn.ai/api. Required. Distinct
@@ -30,39 +32,122 @@ import { Injectable, Logger } from '@nestjs/common';
  *                     single-input model; two-input models need a `model_image`
  *                     this service does not send.
  *   FASHN_STUDIO_PROMPT
- *                     Optional override of the art direction sent with every
- *                     generation — model, pose, backdrop, lighting. Defaults to
- *                     DEFAULT_STUDIO_PROMPT below. This is the only styling
- *                     control the service exposes.
+ *                     Optional override of the whole prompt. Setting it REPLACES
+ *                     the per-dress pose rotation with one fixed string for
+ *                     every generation — see the note on POSE_VARIATIONS.
+ *                     Normally unset.
+ *   FASHN_BACKGROUND_REFERENCE_URL
+ *                     Optional override of the shared backdrop image. Set it to
+ *                     the literal "off" to stop sending `background_reference`
+ *                     at all. Unset derives the URL from R2_PUBLIC_BASE_URL —
+ *                     see STUDIO_BACKGROUND_KEY.
  */
 
 const API_ORIGIN = 'https://api.fashn.ai/v1';
 const DEFAULT_MODEL = 'product-to-model';
 
 /**
- * Art direction for the generated photo — model, pose, backdrop, and lighting.
+ * The pose rotation. One short directive per entry, picked by dress id.
  *
- * This is the entire styling mechanism. `product-to-model` also accepts
- * `background_reference` and `image_prompt` (reference images that anchor the
- * scene), and both are deliberately left unwired: a reference image is one
- * more asset to host, keep reachable, and version, and it competes with the
- * text for control of the result. Text-only means the whole look of the
- * catalog is this one string.
+ * WHY SHORT. FASHN documents `prompt` as "additional styling instructions" and
+ * its own examples are three or four words — "man with tattoos", "tucked-in",
+ * "studio background". Against a field designed for directives, a paragraph
+ * works against itself: the instructions that matter get averaged in with the
+ * ones that are already the model's default behaviour. Every phrase below
+ * earns its place or it goes.
  *
- * The cream-white backdrop is specified by hex so generations sit against the
- * same tone as the site's own surfaces rather than a generic studio grey.
- * Note the model is asked for explicitly (a woman, facing camera, full body):
- * left unsaid, the endpoint varies pose and framing between runs, which reads
- * as inconsistency across a grid of listing cards.
+ * WHY THE BACKDROP AND LIGHTING ARE NO LONGER DESCRIBED HERE. The backdrop is
+ * an image now (see STUDIO_BACKGROUND_KEY) — a reference image pins a tone far
+ * harder than a hex code in a sentence, which the model is free to interpret.
+ * The old string spent three of its seven clauses describing a cream backdrop
+ * with no seam and no floor line; that is now a 1600x2000 PNG that simply is
+ * those things.
+ *
+ * WHY POSE VARIES AT ALL. A straight-on symmetrical stance reads as a
+ * mannequin shot and flattens how a dress hangs. Consistency across the
+ * catalog is supplied by the shared backdrop, the fixed lighting phrase and
+ * the fixed framing — which is where consistency actually matters — so pose is
+ * the one axis left free.
+ *
+ * ORDER AND CONTENT ARE PART OF THE DATA. The index is chosen by hashing the
+ * dress id (see directionFor), so inserting or reordering entries reassigns
+ * poses for dresses that already have generated photos. Append, don't splice,
+ * unless a wholesale reshuffle is what you want.
  */
-const DEFAULT_STUDIO_PROMPT =
-  'Full-body professional fashion photograph of a woman wearing the garment, ' +
-  'standing straight facing the camera in a simple elegant pose. ' +
-  'Plain seamless studio backdrop, warm cream-white tone similar to hex #FAF6F1, ' +
-  'no visible floor line or seam, no shadows or texture on the background. ' +
-  'Soft diffused even studio lighting from the front, no harsh shadows. ' +
-  'Photorealistic, high-end e-commerce fashion photography style, ' +
-  'sharp focus on garment fabric, texture, and color accuracy.';
+const POSE_VARIATIONS = [
+  'weight on one leg, slight turn, hand on hip',
+  'three-quarter angle, relaxed shoulders, soft gaze',
+  'one foot stepped forward, arms relaxed',
+  'weight back, torso turned in, hands clasped at waist',
+  'slight angle, hand grazing fabric at hip',
+] as const;
+
+/**
+ * Appended to every pose. The two things that must NOT vary between dresses:
+ * house style and lighting. Kept to two phrases for the reason above.
+ *
+ * 'full body' IS LOAD-BEARING — DO NOT DROP IT TO SAVE TWO WORDS. Leaving
+ * crop unsaid lets the endpoint vary framing between runs, and a grid of
+ * cards where some models are shown to the ankle and others to the waist
+ * reads as broken. That is the exact class of inconsistency this file exists
+ * to remove, so framing stays pinned even though everything else here is
+ * kept short.
+ *
+ * Two other things push the same way but are not sufficient on their own:
+ * `aspect_ratio` is inherited from the source product image (fixing the
+ * frame's proportions, not what fills it), and the pose directives are
+ * themselves full-body descriptions — "one foot stepped forward" has nowhere
+ * to go in a crop above the knee. Both make the right crop likely; the phrase
+ * makes it asked for.
+ */
+const PROMPT_STYLE_SUFFIX =
+  'full body with face, editorial studio photography. ' +
+  'backdrop color: warm champagne cream (~#E8DCC8, not white, not gray), soft warm lighting ~3000K. ' +
+  'replace the face entirely with a different model';
+
+/**
+ * Object key of the shared backdrop inside the R2 bucket, resolved against
+ * R2_PUBLIC_BASE_URL (the same public origin StorageService writes listing
+ * photos to — see storage.service.ts).
+ *
+ * The asset is a flat 1600x2000 cream gradient, #F7F0E6 → #EFE2D2, no props,
+ * no floor line, no seam. Deliberately warmer than the site's own #FAF6F1
+ * token: that value is a UI surface and reads as plain white when stretched
+ * across a full frame — see the header of scripts/make-studio-backdrop.py.
+ * Retune it by looking at generated photos, not to match the site chrome.
+ * It is passed as `background_reference` on every
+ * generation so the backdrop is literally the same pixels every time instead
+ * of the model's fresh interpretation of the words "cream studio backdrop".
+ * Backdrop drift between cards was the most visible inconsistency in the grid,
+ * and it is not a thing prompt wording can fix.
+ *
+ * Regenerate it with scripts/make-studio-backdrop.py; re-upload under this
+ * exact key. FASHN fetches this URL on every generation, so it must stay
+ * publicly readable — if it 404s, generations fail with ImageLoadError (see
+ * describeRuntimeError, which names this as a likely cause).
+ */
+// const STUDIO_BACKGROUND_KEY = 'studio/studio-backdrop-cream-1600x2000.png';
+
+/**
+ * 32-bit FNV-1a, returned as a uint32.
+ *
+ * Used for two things that both need to be stable across restarts and deploys:
+ * which pose a dress gets, and which diffusion seed it starts from. A
+ * non-cryptographic hash is the right tool — the requirement is determinism
+ * and a decent spread over a 5-element array, not unpredictability.
+ *
+ * `Math.imul` does the 32-bit multiply that plain `*` would lose to float64
+ * rounding once the product exceeds 2^53; `>>> 0` brings the result back into
+ * the unsigned range FASHN's `seed` accepts (0 … 2^32-1).
+ */
+function hash32(input: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
 
 /**
  * Total budget for one image: submit + polling.
@@ -122,17 +207,93 @@ export class AiPhotoService {
   }
 
   /**
-   * Overriding this restyles every future generation with no deploy, which is
-   * the point — prompt wording is the kind of thing that gets tuned by looking
-   * at results, not by reasoning about it in advance.
+   * The art direction for one dress: which pose, which prompt, which seed.
    *
-   * Falls back to the default on whitespace, not just on unset: an env var
-   * accidentally set to "" would otherwise silently strip all art direction
-   * and start producing photos in whatever style the model picks.
+   * BOTH HALVES MATTER, AND THE SEED IS THE BIGGER ONE. FASHN's `seed`
+   * defaults to 42, and the previous version of this file never sent one — so
+   * every generation the catalog has ever produced started from byte-identical
+   * diffusion noise. Starting noise anchors composition and stance far more
+   * strongly than an adjective in the prompt does, which is why asking for
+   * varied poses in text alone kept returning the same shot: the prompt was
+   * arguing with the seed and losing.
+   *
+   * DETERMINISTIC, NOT RANDOM. Same dress in, same pose and same seed out,
+   * across restarts and deploys. That is deliberate: regenerating a listing's
+   * photo after a failure gives back the same composition rather than a
+   * lottery ticket, and a result that looks wrong can be reproduced while
+   * someone investigates it. `Math.random()` here would have made every
+   * complaint about a bad generation unfalsifiable.
+   *
+   * The seed keys on `${dressId}-${poseIndex}` rather than the id alone so
+   * that appending to POSE_VARIATIONS reshuffles the noise too, instead of
+   * pairing a new pose directive with noise already committed to the old one.
+   *
+   * WHY THE SEED KEYS ON THE DRESS AND NOT ON THE INDIVIDUAL PHOTO. A listing
+   * can carry up to 3 photos from the publish form and up to 8 after an admin
+   * adds more (MAX_IMAGES / MAX_GALLERY), and the admin panel can run 6
+   * through here at once — so "several photos of one dress, one batch" is a
+   * real case, and every image in that batch gets the same pose and the same
+   * seed. That is a deliberate trade, not an oversight:
+   *
+   *   - Keeping it: the generations for one listing tend to come back on the
+   *     same model. Shared starting noise is the only thing pulling that way,
+   *     since `face_reference` is not wired up. A gallery showing one dress on
+   *     three different women is a worse failure than a repeated stance.
+   *   - Changing it: guarantees varied composition within a listing, at the
+   *     cost of the above.
+   *
+   * The failure mode this leaves open is narrow — two *near-identical* source
+   * photos yield near-identical generations. Different angles of the same
+   * dress already diverge, because `product_image` differs. So the risk is a
+   * data-quality edge case, while the identity benefit applies to every
+   * multi-photo listing.
+   *
+   * TO SWITCH: take an `imageId` here and hash `${dressId}-${poseIndex}-${imageId}`
+   * for the seed while leaving poseIndex on the dress. Worth doing if listings
+   * turn out to carry several similar photos in practice — check with:
+   *   SELECT count(*) AS photos, count(DISTINCT "dressId") AS dresses
+   *   FROM "DressImage" GROUP BY "dressId" ORDER BY photos DESC;
    */
-  private get studioPrompt(): string {
-    return process.env.FASHN_STUDIO_PROMPT?.trim() || DEFAULT_STUDIO_PROMPT;
+  private directionFor(dressId: string): {
+    prompt: string;
+    seed: number;
+    poseIndex: number;
+  } {
+    const poseIndex = hash32(dressId) % POSE_VARIATIONS.length;
+    const seed = hash32(`${dressId}-${poseIndex}`);
+
+    /* An override replaces the pose rotation wholesale — one fixed string for
+       every dress. Kept because prompt wording is the kind of thing that gets
+       tuned by looking at results rather than reasoning in advance, and doing
+       that without a deploy is worth a little inconsistency. The seed still
+       varies underneath it. Falls back on whitespace, not just on unset: an
+       env var accidentally set to "" would otherwise strip all art direction
+       and start producing photos in whatever style the model picks. */
+    const override = process.env.FASHN_STUDIO_PROMPT?.trim();
+    const prompt =
+      override || `${POSE_VARIATIONS[poseIndex]}, ${PROMPT_STYLE_SUFFIX}`;
+
+    return { prompt, seed, poseIndex };
   }
+
+  /**
+   * Public URL of the shared backdrop, or '' to send no `background_reference`.
+   *
+   * Empty is a supported state, not a failure: R2_PUBLIC_BASE_URL unset (so
+   * there is nowhere to have uploaded it) and an explicit "off" both mean the
+   * parameter is omitted and FASHN invents a background as it did before.
+   * That degrades the consistency this was added for, but it degrades — it
+   * does not break a generation, which is what pointing FASHN at a URL that
+   * isn't there would do.
+   */
+  // private get backgroundReferenceUrl(): string {
+  //   const override = process.env.FASHN_BACKGROUND_REFERENCE_URL?.trim();
+  //   if (override) {
+  //     return override.toLowerCase() === 'off' ? '' : override;
+  //   }
+  //   const base = (process.env.R2_PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '');
+  //   return base ? `${base}/${STUDIO_BACKGROUND_KEY}` : '';
+  // }
 
   private get authHeader(): Record<string, string> {
     return { Authorization: `Bearer ${this.apiKey}` };
@@ -147,14 +308,34 @@ export class AiPhotoService {
    *
    * The returned URL points at FASHN's CDN and EXPIRES AFTER THREE DAYS — hand
    * it straight to StorageService so the copy that gets persisted is our own.
+   *
+   * `dressId` selects the pose and the seed (see directionFor). It is only
+   * ever hashed, so any stable opaque string will do.
    */
-  async generateModelPhoto(garmentImageUrl: string): Promise<string> {
-    const predictionId = await this.submit(garmentImageUrl);
+  async generateModelPhoto(
+    garmentImageUrl: string,
+    dressId: string,
+  ): Promise<string> {
+    const predictionId = await this.submit(garmentImageUrl, dressId);
     return this.pollForOutput(predictionId);
   }
 
   /** Queue the prediction, get back FASHN's id. */
-  private async submit(garmentImageUrl: string): Promise<string> {
+  private async submit(
+    garmentImageUrl: string,
+    dressId: string,
+  ): Promise<string> {
+    const { prompt, seed, poseIndex } = this.directionFor(dressId);
+    // const backgroundReference = this.backgroundReferenceUrl;
+
+    /* Logged because the two levers that decide what comes back are now
+       derived rather than written down, and "why did this dress get that
+       pose" is otherwise unanswerable from the outside. */
+    // this.logger.log(
+    //   `dress ${dressId}: pose ${poseIndex} seed ${seed}` +
+    //     `${backgroundReference ? '' : ' (no background_reference)'}`,
+    // );
+
     const res = await this.call(`${API_ORIGIN}/run`, {
       method: 'POST',
       headers: { ...this.authHeader, 'Content-Type': 'application/json' },
@@ -164,9 +345,19 @@ export class AiPhotoService {
         // fields on this envelope.
         inputs: {
           product_image: garmentImageUrl,
-          // Art direction. No background_reference / image_prompt is sent —
-          // see the note on DEFAULT_STUDIO_PROMPT.
-          prompt: this.studioPrompt,
+          // Short pose directive + fixed style/lighting tail — see
+          // POSE_VARIATIONS.
+          prompt,
+          // THE ACTUAL FIX FOR REPEATED POSES. Omitting this let FASHN apply
+          // its documented default of 42 to every request in the catalog, so
+          // every generation began from identical noise. See directionFor.
+          seed,
+          // Conditionally spread: an absent/"off" backdrop must omit the key
+          // rather than send an empty string, which FASHN would try to fetch
+          // and reject as ImageLoadError.
+          // ...(backgroundReference
+          //   ? { background_reference: backgroundReference }
+          //   : {}),
           num_images: 1,
           // jpeg keeps the stored file small; StorageService accepts it
           // directly, so nothing has to transcode.
@@ -183,7 +374,18 @@ export class AiPhotoService {
           // Raise them together and check the credit table if you ever want
           // sharper output: quality + 4k is 5 credits, 5x this.
           // 1k is ~1MP, already larger than anything the gallery renders.
-          generation_mode: 'fast',
+          //
+          // NEXT LEVER IF LIGHTING IS STILL UNEVEN ACROSS THE GRID. FASHN's
+          // three modes at 1k cost 1 / 2 / 3 credits (fast / balanced /
+          // quality). `quality` produces more realistic and more detailed
+          // output — including more consistent lighting, because it leans less
+          // on the source photo's own exposure — at 3x the cost of the current
+          // setting and a longer wait, which TIMEOUT_MS above would need
+          // raising to absorb. Try `balanced` (2 credits) first: it is the
+          // smaller step and may be enough. Change this only after seeing
+          // whether the seed + backdrop changes already fixed it, so the
+          // credit increase buys something measurable.
+          generation_mode: 'balanced',
           resolution: '1k',
         },
       }),
@@ -257,6 +459,11 @@ export class AiPhotoService {
    */
   private describeRuntimeError(name?: string): string {
     switch (name) {
+      /* Two candidates now, not one: the listing photo, or the shared backdrop
+         at STUDIO_BACKGROUND_KEY. The backdrop is the same URL on every
+         request, so if this error is hitting every generation rather than one,
+         check that it is uploaded and publicly readable before looking at the
+         listing photo. */
       case 'ImageLoadError':
         return 'שירות ה-AI לא הצליח לטעון את התמונה — ודאי שהיא נטענת בדפדפן';
       case 'ContentModerationError':

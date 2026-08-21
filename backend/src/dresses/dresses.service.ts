@@ -6,29 +6,41 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { DressCategory, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  normalizeHashtags,
+  normalizeSizes,
+  resolveBridesmaidSetCount,
+} from './dress-normalize';
 import { CreateDressDto } from './dto/create-dress.dto';
 import { UpdateDressDto } from './dto/update-dress.dto';
 import { UpdateDressStatusDto } from './dto/dress-admin.dto';
+import {
+  BrowseDressesDto,
+  DEFAULT_PAGE_LIMIT,
+  MAX_PAGE_LIMIT,
+  SortKey,
+} from './dto/browse-dresses.dto';
 import { AiPhotoError, AiPhotoService } from './ai-photo.service';
 import { StorageService } from './storage.service';
+import { MailService } from '../common/mail.service';
+import { approvedMail, rejectedMail } from './dress-status-mail';
 
 /**
- * The dress object the frontend consumes. Field-for-field what the old
- * localStorage mock returned (frontend/src/lib/api.js), so App.jsx,
- * AccountPage and AdminPage needed no reshaping when the mock was removed:
- *   - `images` is a flat array of public URLs, not DressImage rows
- *   - `booked` is a flat array of "YYYY-MM-DD" strings, not availability rows
- *   - `createdAt` is epoch millis, because App.jsx sorts on it numerically
+ * Whether the lister was actually emailed about a moderation decision.
  *
- * `photos` is the one addition to that shape. It carries the same images in
- * the same order, but with their row ids and `isAiGenerated` flags — the admin
- * AI photo grid needs to address individual images by id, which flat URLs
- * can't express. `images` is deliberately kept alongside it rather than
- * replaced: every browse/detail consumer (App.jsx, the cards, ProductPage)
- * reads `images[0]` and iterates `images`, and none of them care about ids.
+ * Attached to the response of PATCH /dresses/:id/status ONLY — every other
+ * endpoint returns a ClientDress without it, which is why the field is
+ * optional. It exists so the admin panel can stop claiming an email was sent
+ * regardless of what happened; the toast now reflects the send, and a failure
+ * names itself on screen instead of only in the server log.
  */
+export interface StatusNotification {
+  emailSent: boolean;
+  /** Human-readable Hebrew reason, present only when `emailSent` is false. */
+  emailError?: string;
+}
 
 /** One listing photo, with the identity the admin grid needs. */
 export interface ClientDressPhoto {
@@ -37,6 +49,19 @@ export interface ClientDressPhoto {
   isAiGenerated: boolean;
 }
 
+/**
+ * The dress object the frontend consumes. Flattened for the client rather
+ * than mirroring the row shape:
+ *   - `images` is a flat array of public URLs, not DressImage rows
+ *   - `booked` is a flat array of "YYYY-MM-DD" strings, not availability rows
+ *   - `createdAt` is epoch millis, because the frontend sorts on it numerically
+ *
+ * `photos` carries the same images in the same order, but with their row ids
+ * and `isAiGenerated` flags — the admin AI photo grid addresses individual
+ * images by id, which flat URLs can't express. `images` is deliberately kept
+ * alongside it rather than replaced: every browse/detail consumer reads
+ * `images[0]` and iterates `images`, and none of them care about ids.
+ */
 export interface ClientDress {
   id: string;
   title: string;
@@ -53,7 +78,13 @@ export interface ClientDress {
   sleeveLength: string;
   city: string | null;
   region: string | null;
-  size: string | null;
+  /** Always at least one entry. */
+  sizes: string[];
+  category: DressCategory;
+  /** Non-null only when `category` is "bridesmaid". */
+  bridesmaidSetCount: number | null;
+  /** Stored bare; consumers add the leading "#" for display. */
+  hashtags: string[];
   phone: string | null;
   email: string | null;
   status: string;
@@ -62,6 +93,35 @@ export interface ClientDress {
   images: string[];
   photos: ClientDressPhoto[];
   booked: string[];
+  /**
+   * Set only by updateStatus, and only when a decision actually notified (or
+   * tried to notify) the lister. Absent everywhere else — see
+   * StatusNotification.
+   */
+  notification?: StatusNotification;
+}
+
+/**
+ * What an anonymous browser is allowed to see.
+ *
+ * `phone` and `email` are the listing owner's real contact details. Dropping
+ * them here is what keeps the browse response from handing every visitor the
+ * phone number of every person who has listed a dress; they are served only
+ * from the single-listing endpoint, which the detail view fetches when a card
+ * is actually opened.
+ *
+ * `photos` goes too: image row ids and `isAiGenerated` exist for the admin
+ * photo grid, and nothing public reads them (every browse consumer reads the
+ * flat `images` array — see the note on ClientDress).
+ */
+export type PublicDress = Omit<ClientDress, 'phone' | 'email' | 'photos' | 'notification'>;
+
+/** One page of results, plus what the caller needs to request the next. */
+export interface Page<T> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
 }
 
 /** One entry in the AI generation response — one per requested source image. */
@@ -81,6 +141,23 @@ const CLIENT_INCLUDE = {
 type DressWithRelations = Prisma.DressGetPayload<{ include: typeof CLIENT_INCLUDE }>;
 
 /**
+ * Load CLIENT_INCLUDE's relations with a LATERAL join in the same statement,
+ * instead of Prisma's default of one follow-up query per relation.
+ *
+ * Every dress read includes two relations, so the default costs three round
+ * trips where one does. Free against a local database, dominant against a
+ * distant one — and the database is not local.
+ *
+ * Reads only. `relationLoadStrategy` is not accepted on create/update, so the
+ * write paths below keep the default and pay the extra trips on a response
+ * nobody is waiting on a grid for.
+ *
+ * Requires the `relationJoins` preview feature (see schema.prisma) and a
+ * `prisma generate` after enabling it.
+ */
+const JOIN = { relationLoadStrategy: 'join' } as const;
+
+/**
  * Ceiling on photos per listing, enforced when the admin adds one.
  *
  * Matches the `max` passed to ImageUploader on the admin screen. The publish
@@ -89,6 +166,32 @@ type DressWithRelations = Prisma.DressGetPayload<{ include: typeof CLIENT_INCLUD
  * usefully show. AI generations append into the same set and count against it.
  */
 export const MAX_GALLERY_IMAGES = 8;
+
+/**
+ * How long a cached anonymous browse list may be served for.
+ *
+ * Short on purpose. Every write path calls invalidateBrowseCache(), so this
+ * is the backstop rather than the mechanism — the cost of it expiring late
+ * is a new listing appearing up to a minute after publication, which is
+ * harmless. Raising it only makes sense once the invalidation set has been
+ * observed to be complete in production.
+ */
+const BROWSE_CACHE_TTL_MS = 60_000;
+
+/**
+ * How many leading pages of the unfiltered browse view are worth caching.
+ *
+ * The cache exists for the first-paint path — every visitor lands on the
+ * homepage and gets page 1 of the default sort — and that is the only traffic
+ * with enough repetition to hit. Filtered queries are served live and never
+ * stored: the facets multiply out (colours × sizes × lengths × price × source)
+ * into a key space no single-process Map should try to hold, and each
+ * combination is requested by roughly one person.
+ *
+ * With the cap on cacheable pages, sorts, and page size, the whole cache is at
+ * most CACHEABLE_PAGES × (SORT_KEYS + 1 default) entries.
+ */
+const CACHEABLE_PAGES = 3;
 
 /** `Date` -> "YYYY-MM-DD", in UTC so a day never shifts across timezones. */
 function toDateKey(d: Date): string {
@@ -112,7 +215,23 @@ export class DressesService {
     private readonly prisma: PrismaService,
     private readonly aiPhoto: AiPhotoService,
     private readonly storage: StorageService,
+    /* Provided by the global MailModule (see app.module.ts) — no import
+       needed in DressesModule, same as PrismaService. */
+    private readonly mail: MailService,
   ) {}
+
+  /**
+   * The one cached read in this service: leading pages of the unfiltered
+   * anonymous browse list, keyed by sort and page (see browseCacheKey).
+   *
+   * A plain Map rather than a cache library: the key space is capped at a
+   * handful of entries and the invalidation below is hand-written either way.
+   *
+   * This is per-process. If the API is ever scaled past one instance each
+   * one keeps its own copy and a write on instance A won't clear instance
+   * B — that, not traffic volume, is the signal to move to a shared store.
+   */
+  private browseCache = new Map<string, { data: Page<PublicDress>; expiresAt: number }>();
 
   private toClient(d: DressWithRelations): ClientDress {
     return {
@@ -131,7 +250,10 @@ export class DressesService {
       sleeveLength: d.sleeveLength,
       city: d.city,
       region: d.region,
-      size: d.size,
+      sizes: d.sizes,
+      category: d.category,
+      bridesmaidSetCount: d.bridesmaidSetCount,
+      hashtags: d.hashtags,
       phone: d.phone,
       email: d.email,
       status: d.status,
@@ -149,26 +271,291 @@ export class DressesService {
     };
   }
 
+  /** The browse shape, with the owner's contact details removed. */
+  private toPublic(d: DressWithRelations): PublicDress {
+    const { phone: _phone, email: _email, photos: _photos, ...pub } = this.toClient(d);
+    return pub;
+  }
+
   /**
-   * Browse list. `status` is "approved" (default), a specific status, or
-   * "all" for the admin queue and the owner's own listings — which include
-   * pending and rejected ones.
+   * Every browse facet, as one WHERE.
+   *
+   * `status` is pinned to "approved" here and is not overridable by anything
+   * the caller sends — that is the whole point of this method existing. The
+   * admin queue reaches pending and rejected listings through listForAdmin,
+   * behind AdminGuard.
    */
-  async listDresses(status = 'approved'): Promise<ClientDress[]> {
+  private buildBrowseWhere(q: BrowseDressesDto): Prisma.DressWhereInput {
+    const where: Prisma.DressWhereInput = { status: 'approved' };
+
+    if (q.colors?.length) where.color = { in: q.colors };
+    // `hasSome`, not `in`: `sizes` is an array column, and a dress that fits
+    // both S and M has to appear in a search for either. `in` would be a type
+    // error here, but the intent is worth stating — ANY overlap matches, not
+    // "all the selected sizes".
+    if (q.sizes?.length) where.sizes = { hasSome: q.sizes };
+    if (q.categories?.length) where.category = { in: q.categories };
+    if (q.regions?.length) where.region = { in: q.regions };
+    if (q.dressLengths?.length) where.dressLength = { in: q.dressLengths };
+    if (q.sleeveLengths?.length) where.sleeveLength = { in: q.sleeveLengths };
+    // "all" is the SOURCE_OPTIONS default, i.e. no filter — not a value to match.
+    if (q.source && q.source !== 'all') where.source = q.source;
+
+    const price: Prisma.FloatFilter = {};
+    if (q.minPrice !== undefined) price.gte = q.minPrice;
+    if (q.maxPrice !== undefined) price.lte = q.maxPrice;
+    if (price.gte !== undefined || price.lte !== undefined) where.price = price;
+
+    if (q.q) {
+      const contains = { contains: q.q, mode: Prisma.QueryMode.insensitive };
+      where.OR = [
+        { title: contains },
+        { desc: contains },
+        { color: contains },
+        { region: contains },
+        // Hashtags join the text search rather than getting a filter facet of
+        // their own — that waits for the autocomplete feature.
+        //
+        // EXACT TAG MATCH, not substring, and the difference is worth knowing:
+        // Prisma's array operators (`has`) test membership, and there is no
+        // "any element contains" without dropping to raw SQL. So searching
+        // "ערב" matches the tag "ערב" but not "ערב-קיץ", while still
+        // substring-matching the four scalar fields above. The query is run
+        // through the same normalizer the tags were stored with, so a visitor
+        // typing "#Summer" finds the tag stored as "summer".
+        { hashtags: { has: normalizeHashtags([q.q])[0] ?? q.q } },
+      ];
+    }
+
+    return where;
+  }
+
+  /**
+   * Sort keys map 1:1 onto SORT_OPTIONS in the frontend's SortMenu.
+   *
+   * Every one is tiebroken on `id`. With OFFSET paging a non-unique sort key
+   * has no defined order among equal rows, so two listings at the same price
+   * could swap between two page requests and be shown twice or not at all.
+   * The tiebreak makes the sequence total, which is what makes paging stable.
+   *
+   * No sort selected is newest-first — the frontend's default.
+   */
+  private browseOrderBy(sort?: SortKey): Prisma.DressOrderByWithRelationInput[] {
+    switch (sort) {
+      case 'price_asc':
+        return [{ price: 'asc' }, { id: 'asc' }];
+      case 'price_desc':
+        return [{ price: 'desc' }, { id: 'asc' }];
+      case 'oldest':
+        return [{ createdAt: 'asc' }, { id: 'asc' }];
+      case 'newest':
+      default:
+        return [{ createdAt: 'desc' }, { id: 'asc' }];
+    }
+  }
+
+  /**
+   * Cache key for this request, or null when it shouldn't be cached at all.
+   *
+   * Null for anything filtered, anything past the first few pages, and any
+   * non-default page size — see CACHEABLE_PAGES for why. The page-size check
+   * also means a caller can't mint unlimited cache entries by walking `limit`
+   * from 1 to MAX_PAGE_LIMIT.
+   *
+   * EVERY FACET buildBrowseWhere READS MUST BE LISTED IN `filtered` BELOW.
+   * This is the one place where forgetting a facet is silent and wrong rather
+   * than loud: a filter the WHERE honours but this check doesn't sees the
+   * request as unfiltered, so a category-filtered page 1 gets served — and
+   * stored as — the unfiltered page. It only misbehaves on a cache hit, which
+   * is exactly the request every visitor makes.
+   */
+  private browseCacheKey(q: BrowseDressesDto, page: number, limit: number): string | null {
+    const filtered =
+      !!q.q ||
+      !!q.colors?.length ||
+      !!q.sizes?.length ||
+      !!q.categories?.length ||
+      !!q.regions?.length ||
+      !!q.dressLengths?.length ||
+      !!q.sleeveLengths?.length ||
+      q.minPrice !== undefined ||
+      q.maxPrice !== undefined ||
+      (!!q.source && q.source !== 'all');
+
+    if (filtered) return null;
+    if (page > CACHEABLE_PAGES) return null;
+    if (limit !== DEFAULT_PAGE_LIMIT) return null;
+    return `${q.sort ?? 'newest'}|${page}`;
+  }
+
+  /**
+   * The public browse list: one page of approved listings, filtered and
+   * sorted server-side, with owner contact details stripped.
+   *
+   * There is no way to ask this for a pending or rejected listing — the
+   * moderation queue is listForAdmin, behind AdminGuard.
+   */
+  async listPublic(query: BrowseDressesDto): Promise<Page<PublicDress>> {
+    const page = query.page ?? 1;
+    const limit = Math.min(query.limit ?? DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT);
+
+    const cacheKey = this.browseCacheKey(query, page, limit);
+    if (cacheKey) {
+      const hit = this.browseCache.get(cacheKey);
+      if (hit && hit.expiresAt > Date.now()) return hit.data;
+    }
+
     try {
-      const dresses = await this.prisma.dress.findMany({
-        where: status === 'all' ? {} : { status },
-        orderBy: { createdAt: 'desc' },
-        include: CLIENT_INCLUDE,
-      });
-      return dresses.map((d) => this.toClient(d));
+      const where = this.buildBrowseWhere(query);
+      // One round trip for both: `total` drives the result count the filter
+      // panel shows and the client's "is there a next page" check, so it is
+      // never optional and shouldn't cost a second request.
+      const [rows, total] = await this.prisma.$transaction([
+        this.prisma.dress.findMany({
+          ...JOIN,
+          where,
+          orderBy: this.browseOrderBy(query.sort),
+          skip: (page - 1) * limit,
+          take: limit,
+          include: CLIENT_INCLUDE,
+        }),
+        this.prisma.dress.count({ where }),
+      ]);
+
+      const result: Page<PublicDress> = {
+        items: rows.map((d) => this.toPublic(d)),
+        total,
+        page,
+        limit,
+      };
+
+      if (cacheKey) {
+        this.browseCache.set(cacheKey, {
+          data: result,
+          expiresAt: Date.now() + BROWSE_CACHE_TTL_MS,
+        });
+      }
+      return result;
     } catch {
       throw new InternalServerErrorException('Failed to load dresses');
     }
   }
 
+  /**
+   * Approved listings by id, for the favourites page (which holds ids in the
+   * visitor's localStorage).
+   *
+   * Approved-only is not just a copy of the browse rule: a favourited listing
+   * that was later rejected would otherwise still render, which leaks a
+   * moderation decision to whoever favourited it. Unknown and non-approved
+   * ids are simply absent from the response, and the page renders what came
+   * back.
+   */
+  async listPublicByIds(ids: string[]): Promise<PublicDress[]> {
+    if (!ids.length) return [];
+    const rows = await this.prisma.dress.findMany({
+      ...JOIN,
+      where: { id: { in: ids }, status: 'approved' },
+      include: CLIENT_INCLUDE,
+    });
+    // Restore the caller's order — `IN` gives no ordering guarantee, and the
+    // favourites grid should stay in the order the user saved them.
+    const byId = new Map(rows.map((d) => [d.id, d]));
+    return ids.map((id) => byId.get(id)).filter(Boolean).map((d) => this.toPublic(d!));
+  }
+
+  /**
+   * An owner's own listings, including their pending and rejected ones.
+   *
+   * OWNERSHIP: an email match, the same weak-but-consistent rule deleteDress
+   * uses and for the same reason — this app has no bearer token, so there is
+   * nothing stronger available without introducing real sessions. Anyone who
+   * knows an address can read that person's listings and their own phone
+   * number back. This is not privacy; it goes away when real auth lands.
+   *
+   * Unpaginated: this is one person's listings, and the account screen shows
+   * them as a single list with no pager. The cap is a bound on a pathological
+   * account, not a page size.
+   */
+  async listByOwner(email: string): Promise<ClientDress[]> {
+    const normalized = (email || '').trim().toLowerCase();
+    if (!normalized) return [];
+    const rows = await this.prisma.dress.findMany({
+      ...JOIN,
+      where: { email: normalized },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      include: CLIENT_INCLUDE,
+    });
+    return rows.map((d) => this.toClient(d));
+  }
+
+  /**
+   * The admin moderation queue. Behind AdminGuard — this is the only path to
+   * pending and rejected listings, and it returns the full ClientDress shape
+   * (contact details included) because the queue's whole job is to let the
+   * admin reach the person who listed the dress.
+   *
+   * `counts` covers every status regardless of which one is being shown, so
+   * the tab bar can render "ממתינות (3)" without loading the other tabs.
+   */
+  async listForAdmin(
+    status: string,
+    page = 1,
+    limit = DEFAULT_PAGE_LIMIT,
+    category?: DressCategory,
+  ): Promise<Page<ClientDress> & { counts: Record<string, number> }> {
+    const take = Math.min(limit, MAX_PAGE_LIMIT);
+    const where: Prisma.DressWhereInput = status === 'all' ? {} : { status };
+    // Narrows the rows and the total, but deliberately NOT `counts` below:
+    // the tab badges report how many listings await moderation overall, and
+    // making them follow the category filter would mean "ממתינות (0)" while
+    // pending listings in other categories sit unreviewed.
+    if (category) where.category = category;
+
+    // groupBy sits outside the transaction the other two share: the tab
+    // badges are a summary, they don't have to be consistent with the page
+    // to the row, and Prisma's groupBy result type doesn't survive being
+    // mixed into a $transaction array.
+    const [[rows, total], grouped] = await Promise.all([
+      this.prisma.$transaction([
+        this.prisma.dress.findMany({
+          ...JOIN,
+          where,
+          orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+          skip: (page - 1) * take,
+          take,
+          include: CLIENT_INCLUDE,
+        }),
+        this.prisma.dress.count({ where }),
+      ]),
+      this.prisma.dress.groupBy({ by: ['status'], _count: { _all: true } }),
+    ]);
+
+    const counts: Record<string, number> = { pending: 0, approved: 0, rejected: 0 };
+    for (const g of grouped) counts[g.status] = g._count._all;
+
+    return { items: rows.map((d) => this.toClient(d)), total, page, limit: take, counts };
+  }
+
+  /**
+   * Drops the cached browse pages. Called from every path that changes what
+   * that list would return — including toggleBookedDate, because a dress
+   * payload embeds `booked` (see toClient) and the frontend reads a dress's
+   * availability straight out of the browse response. Missing an
+   * invalidation here would mean showing a taken date as free, so the rule
+   * is simple and deliberately blunt: any write to a dress, its images, its
+   * status or its availability clears every page, not the pages that write
+   * could plausibly have affected. Working out which pages a price edit
+   * shifts a listing between is not worth being wrong about.
+   */
+  private invalidateBrowseCache(): void {
+    this.browseCache.clear();
+  }
+
   async getDressById(id: string): Promise<ClientDress> {
     const dress = await this.prisma.dress.findUnique({
+      ...JOIN,
       where: { id },
       include: CLIENT_INCLUDE,
     });
@@ -179,8 +566,7 @@ export class DressesService {
   /**
    * Create a listing. The owner is resolved from `email` rather than trusted
    * from the body, so a client can't attach a listing to another account.
-   * Status always starts "pending" (schema default) — the approval flow is
-   * unchanged.
+   * Status always starts "pending" (schema default).
    */
   async createDress(dto: CreateDressDto): Promise<ClientDress> {
     const email = dto.email.trim().toLowerCase();
@@ -196,9 +582,23 @@ export class DressesService {
 
     const { images, email: _ignored, ...fields } = dto;
 
+    // Never trust the client's own normalization. The publish form applies
+    // the same rules for immediate feedback (see frontend/src/lib/normalize.js),
+    // but that copy exists so the lister sees the chip they'll get back — it
+    // is not a validation layer, and the form is not the only possible caller.
+    const sizes = normalizeSizes(fields.sizes);
+    const hashtags = normalizeHashtags(fields.hashtags);
+    const bridesmaidSetCount = resolveBridesmaidSetCount(
+      fields.category,
+      fields.bridesmaidSetCount,
+    );
+
     const created = await this.prisma.dress.create({
       data: {
         ...fields,
+        sizes,
+        hashtags,
+        bridesmaidSetCount,
         email,
         ownerId: owner.id,
         images: images?.length
@@ -207,6 +607,7 @@ export class DressesService {
       },
       include: CLIENT_INCLUDE,
     });
+    this.invalidateBrowseCache();
     return this.toClient(created);
   }
 
@@ -223,8 +624,38 @@ export class DressesService {
    * incoming flat `string[]` can't express.
    */
   async updateDress(id: string, dto: UpdateDressDto): Promise<ClientDress> {
-    await this.assertDressExists(id);
-    const { images, ...fields } = dto;
+    // Not assertDressExists: this update needs the row's stored category to
+    // resolve the bridesmaid rule below, and one read can answer both
+    // questions.
+    const existing = await this.prisma.dress.findUnique({
+      where: { id },
+      select: { category: true, bridesmaidSetCount: true },
+    });
+    if (!existing) throw new NotFoundException('השמלה לא נמצאה');
+
+    // `bridesmaidSetCount` is destructured out rather than left on `fields`:
+    // the resolver can legitimately return null (clear the column), which the
+    // DTO's `number | undefined` type can't hold. Passing it separately keeps
+    // that honest instead of casting the null through.
+    const { images, bridesmaidSetCount: incoming, ...fields } = dto;
+
+    // Absent means "leave it alone" on a partial update; present means
+    // "replace the whole set", which is how `images` already behaves.
+    if (fields.sizes) fields.sizes = normalizeSizes(fields.sizes);
+    if (fields.hashtags) fields.hashtags = normalizeHashtags(fields.hashtags);
+
+    /* The bridesmaid rule needs the EFFECTIVE category, not the payload's.
+       An edit that only changes the title carries no category, and resolving
+       against `undefined` would null out a bridesmaid listing's set count on
+       every unrelated save. Falling back to the stored category makes the
+       three cases behave: switching to bridesmaid requires a count, switching
+       away nulls it, and leaving the category alone keeps whatever is
+       already there unless this payload explicitly changes it. */
+    const effectiveCategory = fields.category ?? existing.category;
+    const bridesmaidSetCount = resolveBridesmaidSetCount(
+      effectiveCategory,
+      incoming === undefined ? existing.bridesmaidSetCount : incoming,
+    );
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (images) {
@@ -248,16 +679,42 @@ export class DressesService {
       }
       return tx.dress.update({
         where: { id },
-        data: fields,
+        data: { ...fields, bridesmaidSetCount },
         include: CLIENT_INCLUDE,
       });
     });
+    this.invalidateBrowseCache();
     return this.toClient(updated);
   }
 
-  /** Admin approve/reject. Clears the reason whenever status isn't "rejected". */
+  /**
+   * Admin approve/reject. Clears the reason whenever status isn't "rejected",
+   * and emails the lister about the decision.
+   *
+   * Three deliberate choices in the notification half:
+   *
+   *   - The send is awaited, not fire-and-forget. It costs one HTTP round
+   *     trip on an action an admin performs a handful of times a day, and in
+   *     exchange the response can tell them whether it worked — a detached
+   *     send fails invisibly.
+   *   - It cannot fail the request. MailService returns a result instead of
+   *     throwing (see the note there): the status change has already
+   *     committed, and reporting "approval failed" because an email bounced
+   *     would be a lie that also invites a retry which changes nothing.
+   *   - Only real transitions notify. Re-saving an already-approved listing,
+   *     or moving one back to `pending`, sends nothing — an admin correcting
+   *     a mis-click shouldn't mail the lister twice.
+   */
   async updateStatus(id: string, dto: UpdateDressStatusDto): Promise<ClientDress> {
-    await this.assertDressExists(id);
+    /* Reads the previous status rather than just asserting existence, because
+       "did this actually change?" is what decides whether anyone is emailed.
+       Same 404 as assertDressExists for a missing id. */
+    const before = await this.prisma.dress.findUnique({
+      where: { id },
+      select: { status: true },
+    });
+    if (!before) throw new NotFoundException('שמלה לא נמצאה');
+
     const updated = await this.prisma.dress.update({
       where: { id },
       data: {
@@ -266,7 +723,59 @@ export class DressesService {
       },
       include: CLIENT_INCLUDE,
     });
-    return this.toClient(updated);
+    this.invalidateBrowseCache();
+
+    const client = this.toClient(updated);
+    const notification = await this.notifyStatusDecision(before.status, client);
+    return notification ? { ...client, notification } : client;
+  }
+
+  /**
+   * Send the lister the "approved" / "rejected" email, if this was a real
+   * transition into one of those states.
+   *
+   * Returns what happened so the admin panel can say so, or `undefined` when
+   * this decision doesn't notify anybody. Never throws — see updateStatus.
+   */
+  private async notifyStatusDecision(
+    previousStatus: string,
+    dress: ClientDress,
+  ): Promise<StatusNotification | undefined> {
+    const status = dress.status;
+    if (status !== 'approved' && status !== 'rejected') return undefined;
+    if (status === previousStatus) return undefined;
+
+    /* `email` is nullable on Dress. A listing without one has nobody to
+       reach — a data problem worth naming in the log rather than a send to
+       attempt. */
+    if (!dress.email) {
+      this.logger.error(
+        `Dress ${dress.id} moved to "${status}" but carries no email on the listing — nobody was notified.`,
+      );
+      return { emailSent: false, emailError: 'למודעה אין כתובת אימייל — לא נשלחה הודעה' };
+    }
+
+    const message =
+      status === 'approved'
+        ? approvedMail(dress.email, { id: dress.id, title: dress.title })
+        : rejectedMail(dress.email, {
+            id: dress.id,
+            title: dress.title,
+            rejectReason: dress.rejectReason,
+          });
+
+    const result = await this.mail.send(message);
+    if (result.sent) {
+      this.logger.log(`Dress ${dress.id} → ${status}: notified ${dress.email}`);
+      return { emailSent: true };
+    }
+    /* MailService has already logged the specific cause (missing key, 403 on
+       an unverified From domain, network unreachable). This line ties that
+       cause to the listing it belonged to. */
+    this.logger.error(
+      `Dress ${dress.id} → ${status}: the lister was NOT notified (${result.error ?? 'unknown error'}).`,
+    );
+    return { emailSent: false, emailError: result.error };
   }
 
   /**
@@ -293,6 +802,7 @@ export class DressesService {
         data: { dressId: id, date, status: 'unavailable' },
       });
     }
+    this.invalidateBrowseCache();
     return this.getDressById(id);
   }
 
@@ -351,7 +861,14 @@ export class DressesService {
     const results: AiGenerationResult[] = await Promise.all(
       sources.map(async (src): Promise<AiGenerationResult> => {
         try {
-          const generatedUrl = await this.aiPhoto.generateModelPhoto(src.url);
+          /* `dressId` selects the pose and the diffusion seed — see
+             AiPhotoService.directionFor. Passing it means the same dress keeps
+             a consistent look across regenerations while different dresses get
+             genuinely different starting noise. */
+          const generatedUrl = await this.aiPhoto.generateModelPhoto(
+            src.url,
+            dressId,
+          );
           // The provider's CDN URL expires — persist our own copy before it is
           // ever written to the database.
           const storedUrl = await this.storage.uploadFromUrl(generatedUrl, dressId);
@@ -420,6 +937,7 @@ export class DressesService {
       });
     }
 
+    this.invalidateBrowseCache();
     return results;
   }
 
@@ -455,7 +973,7 @@ export class DressesService {
    * admin's ability to follow it up. The owner is told the count before
    * confirming, so this is disclosed rather than silent.
    *
-   * Everything else hangs off `Dress` with onDelete: Cascade (images, sizes,
+   * Everything else hangs off `Dress` with onDelete: Cascade (images,
    * availability, bookings, reviews, favourites) and goes with the row.
    */
   async deleteDress(id: string, requesterEmail: string): Promise<void> {
@@ -478,6 +996,7 @@ export class DressesService {
     await Promise.all(dress.images.map((img) => this.storage.deleteByPublicUrl(img.url)));
 
     await this.prisma.dress.delete({ where: { id } });
+    this.invalidateBrowseCache();
   }
 
   /**
@@ -501,6 +1020,7 @@ export class DressesService {
       ),
     );
     await this.prisma.dress.deleteMany({ where: { ownerId } });
+    this.invalidateBrowseCache();
   }
 
   /**
@@ -542,6 +1062,7 @@ export class DressesService {
       ),
     ]);
 
+    this.invalidateBrowseCache();
     return this.getDressById(dressId);
   }
 
@@ -574,11 +1095,18 @@ export class DressesService {
     await this.prisma.dressImage.create({
       data: { dressId, url, order: (last?.order ?? -1) + 1 },
     });
+    this.invalidateBrowseCache();
     return this.getDressById(dressId);
   }
 
-  /** Dresses sharing this one's colour or source, excluding itself. */
-  async getSimilarDresses(id: string, limit = 4): Promise<ClientDress[]> {
+  /**
+   * Dresses sharing this one's colour or source, excluding itself.
+   *
+   * Public, so it returns the stripped shape — this feeds the detail view's
+   * "you may also like" rail, which renders cards and reads no contact
+   * details.
+   */
+  async getSimilarDresses(id: string, limit = 4): Promise<PublicDress[]> {
     const current = await this.prisma.dress.findUnique({
       where: { id },
       select: { color: true, source: true },
@@ -589,12 +1117,13 @@ export class DressesService {
     if (current.color !== null) or.push({ color: current.color });
 
     const similar = await this.prisma.dress.findMany({
+      ...JOIN,
       where: { id: { not: id }, status: 'approved', OR: or },
       take: limit,
       orderBy: { createdAt: 'desc' },
       include: CLIENT_INCLUDE,
     });
-    return similar.map((d) => this.toClient(d));
+    return similar.map((d) => this.toPublic(d));
   }
 
   private async assertDressExists(id: string): Promise<void> {

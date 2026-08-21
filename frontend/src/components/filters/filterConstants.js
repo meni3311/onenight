@@ -15,11 +15,16 @@ export const COLOR_SWATCHES = [
   { name: "סגול", hex: "#5E4B79" },
 ];
 
-/* Letter sizes only — numeric sizes are intentionally omitted from the filter UI.
-   "אחר" is included since dresses can be listed under that size too (see
-   SIZES in lib/data.js — the two lists are separate on purpose, not a
-   duplication: this one deliberately excludes numeric sizes). */
-export const LETTER_SIZES = ["XS", "S", "M", "L", "XL", "XXL", "אחר"];
+/* Letter sizes only — numeric sizes are intentionally omitted from the filter
+   UI (see SIZES in lib/data.js — the two lists are separate on purpose, not a
+   duplication).
+
+"אחר" is not in this list either, and is not a matchable value anywhere:
+   SizeMultiSelect renders it as a chip that reveals a free-text box, and
+   whatever that box produces joins `f.sizes` alongside the letters, matched
+   exactly against the dress's own sizes. That box is also the only way to
+   filter for a numeric size, since this list deliberately offers none. */
+export const LETTER_SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
 
 /* Source filter options: [value, label]. "הכל" (all) is the default. */
 export const SOURCE_OPTIONS = [
@@ -42,16 +47,57 @@ export const EMPTY_FILTERS = {
   maxPrice: PRICE.max,
   regions: [],
   sizes: [],
+  /* Multi-select like colours and sizes, not single-select like `source`.
+     The homepage's category tiles will just set one value here. */
+  categories: [],
   dressLengths: [],
   sleeveLengths: [],
   source: "all",
 };
+
+/* How many dresses one page of the gallery holds. Must not exceed
+   MAX_PAGE_LIMIT in the backend's browse-dresses.dto.ts, which rejects
+   anything larger; it's also the only page size the server will cache, so
+   changing it here without changing it there silently costs every cache hit. */
+export const PAGE_LIMIT = 24;
+
+/* Serialize the filter state into the browse endpoint's query string.
+
+   Anything still at its default is deliberately OMITTED rather than sent
+   explicitly. That isn't cosmetic: the server only caches requests that carry
+   no filter params at all (see browseCacheKey in dresses.service.ts), so
+   sending `minPrice=0&maxPrice=1000` on the homepage's first load — which is
+   what the untouched slider holds — would look like a filtered query and miss
+   the cache on the one request every visitor makes.
+
+   Multi-selects go over as comma-separated values, matching the DTO. */
+export function filtersToQuery(f, sort, page, limit = PAGE_LIMIT) {
+  const p = new URLSearchParams();
+
+  if (f.q) p.set("q", f.q);
+  if (f.colors.length) p.set("colors", f.colors.join(","));
+  if (f.sizes.length) p.set("sizes", f.sizes.join(","));
+  if (f.categories.length) p.set("categories", f.categories.join(","));
+  if (f.regions.length) p.set("regions", f.regions.join(","));
+  if (f.dressLengths.length) p.set("dressLengths", f.dressLengths.join(","));
+  if (f.sleeveLengths.length) p.set("sleeveLengths", f.sleeveLengths.join(","));
+  if (f.source !== "all") p.set("source", f.source);
+  if (f.minPrice > PRICE.min) p.set("minPrice", String(f.minPrice));
+  if (f.maxPrice < PRICE.max) p.set("maxPrice", String(f.maxPrice));
+  if (sort) p.set("sort", sort);
+  if (page > 1) p.set("page", String(page));
+  if (limit !== PAGE_LIMIT) p.set("limit", String(limit));
+
+  const qs = p.toString();
+  return qs ? `?${qs}` : "";
+}
 
 /* Number of filters the user has actively changed from their defaults. */
 export function activeFilterCount(f) {
   return (
     f.regions.length +
     f.sizes.length +
+    f.categories.length +
     f.colors.length +
     f.dressLengths.length +
     f.sleeveLengths.length +

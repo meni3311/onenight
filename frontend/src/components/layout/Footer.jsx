@@ -16,7 +16,7 @@ const SOCIAL_LINKS = [
    "ניווט" column was dropped — those links already exist elsewhere in the
    site, e.g. the navbar/user menu). The `.footer` styles live in
    styles.css; static spacing/typography use Tailwind utilities. */
-export function Footer({ toast }) {
+export function Footer({ go, toast }) {
   const year = new Date().getFullYear();
   return (
     <footer className="footer">
@@ -33,6 +33,9 @@ export function Footer({ toast }) {
           <p className="m-0 leading-[2]">
             מייל: menicamp@gmail.com<br />
             וואטסאפ: 058-6770772<br />
+            {/* Same destination as the navbar's "צור קשר" — the contact page
+                carries these details plus the FAQ and the message form. */}
+            <a className="cursor-pointer" onClick={() => go && go("contact")}>צור קשר</a><br />
             <a onClick={() => toast("תקנון האתר")}>תקנון ותנאי שימוש</a>
           </p>
         </div>

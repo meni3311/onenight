@@ -7,7 +7,7 @@ import { StorageService } from './storage.service';
 
 /**
  * Dress feature module — browse/detail, create/edit, the owner's availability
- * calendar, admin approval, photo upload to Supabase Storage, and the
+ * calendar, admin approval, photo upload to Cloudflare R2, and the
  * admin-only AI on-model photo tool. Depends on the global PrismaModule for
  * data access, so no provider wiring beyond these services is required here.
  */

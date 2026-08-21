@@ -6,12 +6,10 @@ import { uploadDressImage } from "../../lib/api.js";
    admin review screen (editing images on a pending request), so both talk
    to the same `images: string[]` shape.
 
-   Those strings are public Supabase Storage URLs. They used to be base64
-   data URLs produced by FileReader and stashed in localStorage, which meant
-   photos existed only in the browser that uploaded them — invisible to
-   everyone else. Files now go straight to Storage via the backend and only
-   the returned URL is held in state, so whatever is submitted is already
-   durable and shareable.
+   Those strings are public Cloudflare R2 URLs, never base64 data URLs:
+   files go straight to storage via the backend and only the returned URL is
+   held in state, so whatever is submitted is already durable and shareable
+   rather than living in the browser that uploaded it.
 
    Uploads happen on selection rather than on form submit: it keeps the
    submit path a plain JSON POST, and the user sees failures while they're

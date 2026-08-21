@@ -1,16 +1,30 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { DressCategory } from '@prisma/client';
 import {
   ArrayMaxSize,
+  ArrayNotEmpty,
   IsArray,
   IsEmail,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsPositive,
   IsString,
   IsUrl,
+  Max,
   MaxLength,
+  Min,
 } from 'class-validator';
+import {
+  BRIDESMAID_SET_MAX,
+  BRIDESMAID_SET_MIN,
+  CATEGORIES,
+  MAX_HASHTAG_LENGTH,
+  MAX_RAW_HASHTAGS,
+  MAX_RAW_SIZES,
+  MAX_SIZE_LENGTH,
+} from '../dress-normalize';
 
 /**
  * Allowed values for the four free-text option columns. These mirror
@@ -61,7 +75,61 @@ export class CreateDressDto {
 
   @ApiPropertyOptional() @IsOptional() @IsString() region?: string;
 
-  @ApiPropertyOptional() @IsOptional() @IsString() size?: string;
+  /**
+   * Every size this listing fits. Replaced a single `size` string.
+   *
+   * NOT checked against a fixed list, unlike `source` / `condition` / the two
+   * lengths above. The publish form offers the standard sizes as chips plus
+   * an "אחר" option that reveals a free-text field, so "מידה אחת" or
+   * "38 ארוך" are legitimate values a whitelist would reject. What is
+   * validated here is shape — string, non-empty array, per-entry length —
+   * and normalizeSizes() takes it from there (comma stripping, case folding
+   * onto the standard spellings, dedupe, count cap).
+   *
+   * The bound is MAX_RAW_SIZES rather than MAX_SIZES on purpose; see the
+   * comment on those constants.
+   */
+  @ApiProperty({ type: [String], description: 'Standard sizes and/or free-text ones' })
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  @MaxLength(MAX_SIZE_LENGTH, { each: true })
+  @ArrayMaxSize(MAX_RAW_SIZES)
+  sizes!: string[];
+
+  /** The occasion this listing is for. See the DressCategory enum. */
+  @ApiProperty({ enum: CATEGORIES })
+  @IsIn(CATEGORIES)
+  category!: DressCategory;
+
+  /**
+   * Dresses in the set. Only accepted for `category: 'bridesmaid'` — for any
+   * other category the service forces it to null rather than rejecting it,
+   * since a leftover value is the form's residue after a category switch and
+   * not something the lister can still see. Required when the category IS
+   * bridesmaid; that check lives in resolveBridesmaidSetCount, because it
+   * depends on another field and class-validator would need a custom
+   * validator to express it.
+   */
+  @ApiPropertyOptional({ minimum: BRIDESMAID_SET_MIN, maximum: BRIDESMAID_SET_MAX })
+  @IsOptional()
+  @IsInt()
+  @Min(BRIDESMAID_SET_MIN)
+  @Max(BRIDESMAID_SET_MAX)
+  bridesmaidSetCount?: number;
+
+  /**
+   * Free-text discovery tags. No fixed vocabulary — autocomplete is a later
+   * feature. Sent with or without a leading "#"; normalizeHashtags() strips
+   * it, lowercases, hyphenates whitespace, dedupes and caps the count.
+   */
+  @ApiPropertyOptional({ type: [String], description: 'With or without a leading #' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(MAX_HASHTAG_LENGTH * 2, { each: true })
+  @ArrayMaxSize(MAX_RAW_HASHTAGS)
+  hashtags?: string[];
 
   @ApiPropertyOptional() @IsOptional() @IsString() phone?: string;
 
@@ -69,7 +137,7 @@ export class CreateDressDto {
   @ApiProperty() @IsEmail() email!: string;
 
   /**
-   * Public Supabase Storage URLs produced by POST /dresses/images. `IsUrl`
+   * Public Cloudflare R2 URLs produced by POST /dresses/images. `IsUrl`
    * rejects the base64 data: URLs the old mock used to store, which is the
    * point — image bytes must never come through this endpoint again.
    */

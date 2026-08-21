@@ -2,35 +2,64 @@
    Root App — onenight dress rental marketplace (Hebrew RTL).
    Owns routing + shared state; delegates rendering to pages.
    ============================================================ */
-import { useState, useEffect, useMemo } from "react";
-import { api } from "./lib/api.js";
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
+import { api, browseDresses, getDress, getDressesByIds } from "./lib/api.js";
 import { purgeLegacyDressStorage } from "./lib/data.js";
 import { useLocalStorage } from "./hooks/useLocalStorage.js";
 import { useToast } from "./hooks/useToast.js";
-import { EMPTY_FILTERS } from "./components/filters/filterConstants.js";
+import { EMPTY_FILTERS, filtersToQuery } from "./components/filters/filterConstants.js";
 import { SiteHeader } from "./components/layout/SiteHeader.jsx";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import { Footer } from "./components/layout/Footer.jsx";
 import { Toast } from "./components/ui/Toast.jsx";
-import ProductPage from "./pages/ProductPage.jsx";
 import HomePage from "./pages/HomePage.jsx";
-import FavoritesPage from "./pages/FavoritesPage.jsx";
-import PublishPage from "./pages/PublishPage.jsx";
-import ThankYou from "./pages/ThankYou.jsx";
-import AuthPage from "./pages/AuthPage.jsx";
-import AccountPage from "./pages/AccountPage.jsx";
-import AdminPage from "./pages/AdminPage.jsx";
-import TermsPage from "./pages/TermsPage.jsx";
+
+/* Route-level code splitting. HomePage stays in the initial chunk because
+   it *is* the first paint; every other route is fetched on demand.
+   The two that matter most for bundle size pull heavy transitive deps
+   along with them: AccountPage owns DressAvailabilityCalendar, which drags
+   in react-day-picker + date-fns, and AdminPage owns AdminPhotosPanel.
+   Neither is reachable without a deliberate click, so neither belongs in
+   the bundle every first-time visitor downloads. */
+const ProductPage = lazy(() => import("./pages/ProductPage.jsx"));
+const FavoritesPage = lazy(() => import("./pages/FavoritesPage.jsx"));
+const PublishPage = lazy(() => import("./pages/PublishPage.jsx"));
+const ThankYou = lazy(() => import("./pages/ThankYou.jsx"));
+const AuthPage = lazy(() => import("./pages/AuthPage.jsx"));
+const AccountPage = lazy(() => import("./pages/AccountPage.jsx"));
+const AdminPage = lazy(() => import("./pages/AdminPage.jsx"));
+const TermsPage = lazy(() => import("./pages/TermsPage.jsx"));
+const ContactPage = lazy(() => import("./pages/ContactPage.jsx"));
+
+/* Reuses the existing .empty / .page styling rather than introducing a new
+   loading treatment, so a chunk fetch looks like the rest of the app. */
+function RouteFallback() {
+  return (
+    <div className="container page pt-[50px]">
+      <div className="empty">טוען…</div>
+    </div>
+  );
+}
 
 /* Routes reachable via a real URL hash (bookmarkable / open-in-new-tab),
    same pattern the admin panel already uses (see README: /#admin). The
    registration form's terms link opens /#terms in a new tab this way,
    rather than needing its own modal-on-modal treatment. */
-const HASH_ROUTES = new Set(["admin", "terms"]);
+const HASH_ROUTES = new Set(["admin", "terms", "contact"]);
 const routeFromHash = () => {
   const h = location.hash.replace("#", "");
   return HASH_ROUTES.has(h) ? h : "home";
 };
+
+/* Deep link to a single listing: /#dress=<id>.
+   This is the link the backend puts in the "your dress was approved" email
+   (see MailService / DressesService.updateStatus), so it has to survive
+   being opened cold in a new tab from an inbox — no app state, no prior
+   navigation. It isn't a HASH_ROUTE because it doesn't select a route: the
+   dress page is an overlay App renders on top of whatever route is showing,
+   so this resolves to the homepage with a listing open, exactly as if the
+   card had been clicked. Unknown ids fall through to a toast. */
+const DRESS_HASH_RE = /^#dress=(.+)$/;
 
 /* Bridges AccountPage (legacy phone/password-shaped `user`) onto the live
    OTP session from AuthContext, since AccountPage is otherwise only ever
@@ -88,9 +117,26 @@ function PublishRoute(props) {
   return <PublishPage {...props} />;
 }
 
+/* How long to wait after the last filter change before asking the server.
+
+   Filtering is a request now, not an array pass, and the price control is a
+   range input that fires on every pixel of a drag — without this, one drag is
+   dozens of queries. Chip clicks pay the same 250ms, which is under the
+   threshold where a control feels unresponsive. The very first load skips it
+   entirely (see the ref below): that request is the homepage's first paint and
+   has nothing to debounce against. */
+const FILTER_DEBOUNCE_MS = 250;
+
 export default function App() {
   const [route, setRoute] = useState(routeFromHash);
+  /* One page of approved listings — NOT the catalogue. Anything that needs a
+     different slice (the owner's own listings, the moderation queue,
+     favourites) asks for that slice itself rather than filtering this
+     array. */
   const [dresses, setDresses] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useLocalStorage("onenight_user", null);
   const [favIds, setFavIds] = useLocalStorage("onenight_favs", []);
@@ -104,28 +150,109 @@ export default function App() {
   const [sort, setSort] = useState(null);
   const [toastMsg, toast] = useToast();
 
-  const reloadDresses = async () => {
-    try {
-      const data = await api("/api/dresses?status=all");
-      setDresses(data || []);
-    } catch (e) {
-      console.error("טעינת שמלות נכשלה", e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   /* Clear the pre-Postgres mock listings out of this browser before the
-     first load. Runs ahead of reloadDresses so a stale cache can never be
-     mistaken for API data during that first render. */
+     first load, so a stale cache can never be mistaken for API data during
+     that first render. The browse fetch itself is the effect below. */
   useEffect(() => {
     purgeLegacyDressStorage();
-    reloadDresses();
+  }, []);
+
+  /* The filters and sort, as the query string the server will answer.
+     Memoized so the fetch effect keys on the string rather than on `filters`
+     object identity — setFilters replaces the object on every keystroke of a
+     slider drag, but most of those produce the same query. */
+  const browseQuery = useMemo(() => filtersToQuery(filters, sort, 1), [filters, sort]);
+
+  /* Skips the debounce for the first request only — see FILTER_DEBOUNCE_MS. */
+  const firstLoad = useRef(true);
+
+  /* Page 1 whenever the filters or the sort change. Both are server-side now,
+     so a filter change is a refetch, and it resets paging: page 3 of "red
+     dresses under ₪300" has nothing to do with page 3 of the unfiltered list. */
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const delay = firstLoad.current ? 0 : FILTER_DEBOUNCE_MS;
+    firstLoad.current = false;
+
+    const t = setTimeout(async () => {
+      try {
+        const res = await browseDresses(browseQuery);
+        /* A slower earlier request must not overwrite a newer one's results.
+           Clearing the flag in cleanup means only the latest effect run can
+           still write to state. */
+        if (cancelled) return;
+        setDresses(res?.items || []);
+        setTotal(res?.total || 0);
+        setPage(1);
+      } catch (e) {
+        if (!cancelled) console.error("טעינת שמלות נכשלה", e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, delay);
+
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [browseQuery]);
+
+  const hasMore = dresses.length < total;
+
+  /* Append the next page. The grid grows rather than replacing itself — the
+     cards have a staggered reveal animation and a page-number pager would
+     replay it from the top on every click. */
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    const next = page + 1;
+    setLoadingMore(true);
+    try {
+      const res = await browseDresses(filtersToQuery(filters, sort, next));
+      setDresses((p) => [...p, ...(res?.items || [])]);
+      if (typeof res?.total === "number") setTotal(res.total);
+      setPage(next);
+    } catch (e) {
+      toast("טעינת שמלות נוספות נכשלה");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [filters, sort, page, hasMore, loadingMore, toast]);
+
+  /* Warm the ProductPage chunk once the browser is idle. It's lazy so it
+     stays off the critical path, but opening a dress is the single most
+     likely next action from the homepage — without this, the first card
+     click would pay a network round-trip before the modal appears. */
+  useEffect(() => {
+    const warm = () => import("./pages/ProductPage.jsx");
+    if ("requestIdleCallback" in window) {
+      const id = requestIdleCallback(warm);
+      return () => cancelIdleCallback(id);
+    }
+    const t = setTimeout(warm, 2000);
+    return () => clearTimeout(t);
   }, []);
   useEffect(() => {
     const h = () => { const hr = routeFromHash(); if (HASH_ROUTES.has(hr)) setRoute(hr); };
     window.addEventListener("hashchange", h);
     return () => window.removeEventListener("hashchange", h);
+  }, []);
+
+  /* Resolve /#dress=<id> into an open listing — see DRESS_HASH_RE. Runs on
+     mount (the cold-from-an-email case) and on hashchange, so pasting the
+     link into the address bar of an already-open tab works too. The fetch is
+     getDress rather than a lookup in `dresses`: that array is one page of
+     approved listings and the linked dress may well not be on it. */
+  useEffect(() => {
+    const openFromHash = () => {
+      const m = DRESS_HASH_RE.exec(location.hash);
+      if (!m) return;
+      const id = decodeURIComponent(m[1]);
+      getDress(id)
+        .then((full) => { if (full) setSelected(full); })
+        .catch(() => toast("השמלה המבוקשת לא נמצאה"));
+    };
+    openFromHash();
+    window.addEventListener("hashchange", openFromHash);
+    return () => window.removeEventListener("hashchange", openFromHash);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* Hide the viewport scrollbar on the homepage only (see the
@@ -141,14 +268,28 @@ export default function App() {
     return () => el.classList.remove("hide-viewport-scrollbar");
   }, [route]);
 
-  const dressById = (id) => dresses.find((d) => d.id === id);
-  const toggleFav = (id) =>
-    setFavIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
-  const go = (r) => {
+  /* These are passed down through the whole tree, so a fresh identity
+     on every render defeats React.memo on anything below them (notably
+     ProductCard, which is on screen once per listing). setFavIds/setRoute
+     are useState setters and stable, so the dependency lists are honest. */
+  const toggleFav = useCallback(
+    (id) => setFavIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id])),
+    [setFavIds],
+  );
+  const go = useCallback((r) => {
     setRoute(r);
     window.scrollTo({ top: 0 });
-    if (!HASH_ROUTES.has(r) && location.hash) history.replaceState(null, "", location.pathname);
-  };
+    /* Keep the URL honest about where we are: the hash follows the route in
+       both directions, so /#dress=abc can't sit in the address bar while the
+       contact page is on screen and a reload lands where you actually are.
+       replaceState does not fire `hashchange`, so this can't feed back into
+       the listener above. */
+    if (HASH_ROUTES.has(r)) {
+      if (location.hash !== `#${r}`) history.replaceState(null, "", `#${r}`);
+    } else if (location.hash) {
+      history.replaceState(null, "", location.pathname);
+    }
+  }, []);
 
   const onAuth = (u) => { setUser(u); setRoute("account"); toast("ברוכה הבאה, " + u.name + " 🌸"); };
   const logout = () => { setUser(null); go("home"); toast("התנתקת בהצלחה"); };
@@ -157,10 +298,14 @@ export default function App() {
      app-level error surface), but PublishPage needs to know the call failed
      so it can clear its submit-button spinner and let the user retry —
      swallowing the error here left the button stuck spinning forever. */
+  /* A new listing starts as "pending" (see the schema default), so it does
+     NOT belong in the browse list — that list is approved-only now, and
+     prepending here would have shown the author an unapproved dress sitting
+     in the public gallery. It appears under "השמלות שלי" on the account
+     screen, which fetches the owner's listings at every status. */
   const publish = async (data) => {
     try {
-      const created = await api("/api/dresses", { method: "POST", body: data });
-      setDresses((p) => [created, ...p]);
+      await api("/api/dresses", { method: "POST", body: data });
       setRoute("thankyou");
       window.scrollTo({ top: 0 });
     } catch (e) {
@@ -169,38 +314,29 @@ export default function App() {
     }
   };
 
-  const visible = useMemo(() => {
-    return dresses
-      .filter((d) => d.status === "approved")
-      .filter((d) => {
-        if (filters.q) {
-          const q = filters.q.toLowerCase();
-          const hay = (d.title + d.desc + d.color + d.region).toLowerCase();
-          if (!hay.includes(q)) return false;
-        }
-        if (filters.colors.length && !filters.colors.includes(d.color)) return false;
-        if (d.price > filters.maxPrice) return false;
-        if (d.price < filters.minPrice) return false;
-        if (filters.regions.length && !filters.regions.includes(d.region)) return false;
-        if (filters.sizes.length && !filters.sizes.includes(d.size)) return false;
-        if (filters.dressLengths.length && !filters.dressLengths.includes(d.dressLength)) return false;
-        if (filters.sleeveLengths.length && !filters.sleeveLengths.includes(d.sleeveLength)) return false;
-        if (filters.source !== "all" && d.source !== filters.source) return false;
-        return true;
-      });
-  }, [dresses, filters]);
+  /* Favourites are ids in localStorage, resolved server-side: only one page
+     of listings is in the browser, so a local lookup would silently drop
+     every favourite that wasn't on it. Fetched on entering the page rather
+     than on every heart click: `favIds` changes as the user toggles hearts in
+     the grid, and refetching there would be a request per click for a list
+     nothing is currently showing. */
+  const [favDresses, setFavDresses] = useState([]);
+  const [favLoading, setFavLoading] = useState(false);
 
-  const sorted = useMemo(() => {
-    if (!sort) return visible;
-    const arr = [...visible];
-    if (sort === "price_asc") arr.sort((a, b) => a.price - b.price);
-    else if (sort === "price_desc") arr.sort((a, b) => b.price - a.price);
-    else if (sort === "newest") arr.sort((a, b) => b.createdAt - a.createdAt);
-    else if (sort === "oldest") arr.sort((a, b) => a.createdAt - b.createdAt);
-    return arr;
-  }, [visible, sort]);
-
-  const favDresses = favIds.map(dressById).filter(Boolean);
+  useEffect(() => {
+    if (route !== "favorites") return;
+    let cancelled = false;
+    setFavLoading(true);
+    getDressesByIds(favIds)
+      .then((rows) => { if (!cancelled) setFavDresses(rows || []); })
+      .catch(() => { if (!cancelled) toast("טעינת המועדפים נכשלה"); })
+      .finally(() => { if (!cancelled) setFavLoading(false); });
+    return () => { cancelled = true; };
+    /* Deliberately not keyed on favIds — see above. Un-hearting from within
+       the favourites page still removes the card, because FavoritesPage
+       filters what it renders by the live favIds. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route]);
 
   return (
     <AuthProvider go={go}>
@@ -221,45 +357,67 @@ export default function App() {
           sort={sort}
           setSort={setSort}
           loading={loading}
-          dresses={sorted}
-          allDresses={dresses}
-          favIds={favIds}
-          onFav={toggleFav}
-          onOpen={setSelected}
-        />
-      )}
-
-      {route === "publish" && <PublishRoute onSubmit={publish} goHome={() => go("home")} />}
-      {route === "thankyou" && <ThankYou goHome={() => go("home")} />}
-      {route === "terms" && <TermsPage goHome={() => go("home")} />}
-
-      {route === "favorites" && (
-        <FavoritesPage dresses={favDresses} favIds={favIds} onFav={toggleFav} onOpen={setSelected} go={go} />
-      )}
-
-      {route === "login" && (
-        <AuthPage mode={authMode} onAuth={onAuth} goHome={() => go("home")} toast={toast} />
-      )}
-
-      {route === "account" && (
-        <AccountRoute
-          user={user}
-          setUser={setUser}
           dresses={dresses}
-          setDresses={setDresses}
+          total={total}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
+          onLoadMore={loadMore}
           favIds={favIds}
-          dressById={dressById}
-          onOpen={setSelected}
           onFav={toggleFav}
-          toast={toast}
-          initialTab={accountTab}
+          onOpen={setSelected}
         />
       )}
 
-      {route === "admin" && (
-        <AdminPage dresses={dresses} setDresses={setDresses} toast={toast} dressById={dressById} onOpen={setSelected} />
-      )}
+      <Suspense fallback={<RouteFallback />}>
+        {route === "publish" && <PublishRoute onSubmit={publish} goHome={() => go("home")} />}
+        {route === "thankyou" && <ThankYou goHome={() => go("home")} />}
+        {route === "terms" && <TermsPage goHome={() => go("home")} />}
+        {route === "contact" && <ContactPage goHome={() => go("home")} />}
 
+        {route === "favorites" && (
+          <FavoritesPage
+            dresses={favDresses}
+            loading={favLoading}
+            favIds={favIds}
+            onFav={toggleFav}
+            onOpen={setSelected}
+            go={go}
+          />
+        )}
+
+        {route === "login" && (
+          <AuthPage mode={authMode} onAuth={onAuth} goHome={() => go("home")} toast={toast} />
+        )}
+
+        {/* Both need listings the public list deliberately excludes — the
+            owner's pending/rejected ones, and the whole moderation queue —
+            so each fetches its own from an endpoint scoped to it. */}
+        {route === "account" && (
+          <AccountRoute
+            user={user}
+            setUser={setUser}
+            favIds={favIds}
+            onOpen={setSelected}
+            onFav={toggleFav}
+            toast={toast}
+            initialTab={accountTab}
+          />
+        )}
+
+        {route === "admin" && (
+          <AdminPage toast={toast} onOpen={setSelected} />
+        )}
+      </Suspense>
+
+      {/* Separate boundary, and deliberately `null`: this is a full-screen
+          overlay, so a centred "loading" card behind it would flash in the
+          page body. The idle prefetch above means the chunk is normally
+          already warm by the time a card is clicked. */}
+      <Suspense fallback={null}>
+      {/* `d` is the card that was clicked — enough to paint the page
+          immediately. ProductPage fetches the rest itself: the owner's phone
+          (stripped from the public list, and needed by the WhatsApp CTA) and
+          the "you may also like" rail from /api/dresses/:id/similar. */}
       {selected && (
         <ProductPage
           d={selected}
@@ -267,10 +425,10 @@ export default function App() {
           onFav={toggleFav}
           onClose={() => setSelected(null)}
           toast={toast}
-          similar={dresses.filter((x) => x.status === "approved" && x.id !== selected.id)}
           onOpenSimilar={(dr) => { setSelected(dr); window.scrollTo({ top: 0 }); }}
         />
       )}
+      </Suspense>
 
       <Footer go={go} toast={toast} />
 

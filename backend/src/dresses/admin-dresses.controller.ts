@@ -1,13 +1,16 @@
-import { Body, Controller, Delete, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AdminGuard } from '../common/admin.guard';
 import {
   AiGenerationResult,
   ClientDress,
   DressesService,
+  Page,
 } from './dresses.service';
 import { AiGenerateDto } from './dto/ai-generate.dto';
 import { AddImageDto } from './dto/add-image.dto';
+import { DEFAULT_PAGE_LIMIT } from './dto/browse-dresses.dto';
+import { AdminListDressesDto } from './dto/dress-admin.dto';
 
 /**
  * Admin-only operations on a dress that don't belong on the public
@@ -29,6 +32,31 @@ import { AddImageDto } from './dto/add-image.dto';
 @UseGuards(AdminGuard)
 export class AdminDressesController {
   constructor(private readonly service: DressesService) {}
+
+  /**
+   * The moderation queue — the only way to reach pending and rejected
+   * listings.
+   *
+   * AdminGuard is declared at the class level here, so this route is gated
+   * by construction: the password decides whether the queue is *sent*, not
+   * merely whether it is rendered.
+   *
+   * Returns full ClientDress objects, contact details included — reaching the
+   * lister is what the queue is for (the screen renders their phone and links
+   * to WhatsApp). Declared before any `:dressId` route in this controller.
+   */
+  @Get()
+  @ApiOperation({ summary: 'Admin: the moderation queue, paginated, with per-status counts' })
+  list(
+    @Query() query: AdminListDressesDto,
+  ): Promise<Page<ClientDress> & { counts: Record<string, number> }> {
+    return this.service.listForAdmin(
+      query.status ?? 'pending',
+      query.page ?? 1,
+      query.limit ?? DEFAULT_PAGE_LIMIT,
+      query.category,
+    );
+  }
 
   /**
    * Generate model photos from selected listing photos.

@@ -2,22 +2,28 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { Img } from "../components/ui/Img.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock.js";
-import { withBase } from "../lib/api.js";
+import { getDress, getSimilarDresses, withBase } from "../lib/api.js";
+import { CATEGORY_LABELS } from "../lib/data.js";
 
 /* ============================================================================
    ProductPage — full dedicated dress page (mobile-first, RTL).
-   Replaces the old DetailModal popup entirely. Rent-the-Runway × SSENSE feel:
+   Rent-the-Runway × SSENSE feel:
    full-bleed gallery, editorial identity block, size + date selection,
    accordion details, reviews rail, similar dresses, sticky booking CTA.
 
-   Props (same shape App already passes for the old modal, plus optional rail):
-     d              — the dress object
+   Props:
+     d              — the card that was clicked. A browse-list dress, which is
+                      deliberately incomplete: the public list carries no
+                      `phone`, so this page fetches the full record itself and
+                      renders from the card meanwhile (see `detail` below).
      fav            — is this dress favorited
      onFav(id)      — toggle favorite
      onClose()      — back to the dress grid
      toast(msg)     — transient toast
-     similar        — (optional) other dresses for the "you may also like" rail
      onOpenSimilar  — (optional) open another dress
+
+   The "you may also like" rail comes from /api/dresses/:id/similar, fetched
+   here rather than passed in.
 ============================================================================ */
 
 /* ---- design tokens straight from the brief ---- */
@@ -32,6 +38,14 @@ const C = {
   white: "#FFFFFF",
   green: "#4CAF50",
   disabled: "#CCCCCC",
+  /* Site palette, used by the gallery chrome only. A white glyph vanishes
+     against a pale dress photo, and most of this catalogue is pale. Bordeaux
+     is the brand's own ink
+     (COLORS.bordeaux in constants/theme.js, the navbar's icon colour) and
+     reads against both light and dark photography through the frosted glass
+     behind it. The rest of this page's fuchsia system is untouched. */
+  bordeaux: "#6B2D2D",
+  bordeauxDeep: "#5A2424",
 };
 const SERIF = "'Cormorant Garamond','Frank Ruhl Libre',serif";
 const UI = "'Jost','Assistant',system-ui,sans-serif";
@@ -102,10 +116,50 @@ function Gallery({ images, color, label, fav, onFav, onBack }) {
       </button>
 
       <button type="button" className="op-glass op-glass-fav" aria-label={fav ? "הסרה ממועדפים" : "הוספה למועדפים"} aria-pressed={fav} onClick={onFav}>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill={fav ? C.fuchsia : "none"} stroke={fav ? C.fuchsia : "#fff"} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        {/* `currentColor` for both fill and stroke so the one bordeaux tone on
+            .op-glass drives the whole glyph — favourited fills it in, not
+            recolours it. Hover/active shading then applies to both halves
+            automatically instead of needing a second hardcoded hex here. */}
+        <svg width="20" height="20" viewBox="0 0 24 24" fill={fav ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
           <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
         </svg>
       </button>
+
+      {/* Prev / next, one on each side of the photo. The gallery has always
+          been swipeable (see onTouchStart above) but that gesture doesn't
+          exist on a desktop pointer, so the dots were the only way through
+          the images there — and a 7px dot is a poor click target. Rendered
+          only when there is more than one photo; with a single image there is
+          nothing to step through and an arrow would be a dead control.
+
+          `go()` already wraps modulo n, so the last image steps to the first
+          and there are no disabled end states to style. */}
+      {n > 1 && (
+        <>
+          <button
+            type="button"
+            className="op-arrow op-arrow-prev"
+            aria-label="התמונה הקודמת"
+            onClick={() => go(idx - 1)}
+          >
+            {/* RTL gallery: "previous" moves toward the start of the strip,
+                which sits on the right — so the previous arrow points right. */}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="op-arrow op-arrow-next"
+            aria-label="התמונה הבאה"
+            onClick={() => go(idx + 1)}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 6l-6 6 6 6" />
+            </svg>
+          </button>
+        </>
+      )}
 
       {n > 1 && (
         <div className="op-dots">
@@ -192,8 +246,15 @@ function AccordionRow({ title, children, open, onToggle }) {
 }
 
 /* ============================================================== ProductPage */
-export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [], onOpenSimilar }) {
+export default function ProductPage({ d: summary, fav, onFav, onClose, toast, onOpenSimilar }) {
   const { isLoggedIn, account, openAuth } = useAuth();
+  /* The full record and the rail, both fetched on open. `detail` starts null
+     and the page renders from the clicked card until it lands, so opening a
+     dress still paints immediately — the only thing missing in that window is
+     the owner's phone, which is needed at the very end of the flow (pick a
+     size, pick dates, then book) rather than on arrival. */
+  const [detail, setDetail] = useState(null);
+  const [similar, setSimilar] = useState([]);
   const [size, setSize] = useState(null);
   const [range, setRange] = useState({ start: null, end: null });
   const [openAcc, setOpenAcc] = useState(0);
@@ -208,12 +269,35 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
      hidden body scroll at the viewport edge (fixed positioning can't hide
      browser-chrome scrollbars), which read as a stray grey scrollbar on
      the left. useBodyScrollLock is the same hook the auth modal and mobile
-     nav already use — this mirrors what the old DetailModal this page
-     "replaces entirely" (see file header) used to do, which the migration
-     dropped. */
+     nav already use. */
   useBodyScrollLock(true);
 
-  useEffect(() => { window.scrollTo?.({ top: 0 }); }, [d?.id]);
+  useEffect(() => { window.scrollTo?.({ top: 0 }); }, [summary?.id]);
+
+  /* Keyed on the id, so opening another dress from the rail refetches rather
+     than showing the previous one's contact details or suggestions. Both
+     failures are quiet: a missing rail is invisible, and a missing detail
+     leaves the card's own data on screen — book() below is what refuses to
+     proceed without a phone number. */
+  useEffect(() => {
+    const id = summary?.id;
+    if (!id) return;
+    let cancelled = false;
+    setDetail(null);
+    setSimilar([]);
+    getDress(id)
+      .then((full) => { if (!cancelled) setDetail(full); })
+      .catch(() => {});
+    getSimilarDresses(id, 6)
+      .then((rows) => { if (!cancelled) setSimilar(rows || []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [summary?.id]);
+
+  /* One object for the render: the fetched record once it's here, the clicked
+     card until then. Same field names either way — the public list is the
+     full shape minus the contact details. */
+  const d = detail || summary;
 
   if (!d) return null;
 
@@ -221,9 +305,13 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
   const booked = d.booked || [];
   const sellerLabel = d.source === "שם חנות" ? (d.store || "בוטיק") : (d.source || "תפירה אישית");
 
-  /* this physical garment is a single size; that size is the only one in stock */
-  const sizeList = STD_SIZES.includes(d.size) ? STD_SIZES : [...STD_SIZES, d.size];
-  const isSizeAvailable = (s) => s === d.size;
+  /* A listing carries every size it fits now, not one. The picker offers the
+     standard run plus any non-standard size this dress was actually listed
+     under ("מידה אחת", "38 ארוך" — see the Other field in SizeMultiSelect),
+     and everything the dress fits is selectable rather than just one chip. */
+  const dressSizes = d.sizes || [];
+  const sizeList = [...STD_SIZES, ...dressSizes.filter((s) => !STD_SIZES.includes(s))];
+  const isSizeAvailable = (s) => dressSizes.includes(s);
 
   const pickDate = (k) => {
     setRange((p) => {
@@ -280,6 +368,14 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
       setAuthPrompt(true);
       return;
     }
+    /* The owner's number isn't on the browse card — it comes with the detail
+       fetch above. Reaching here without it means that request hasn't landed
+       (or failed), and continuing would open WhatsApp on a malformed number
+       and log an inquiry the admin can't act on. */
+    if (!d.phone) {
+      toast && toast("רגע, טוענים את פרטי המודעה…");
+      return;
+    }
     logBookingInquiry();
     const datePhrase = ` לתאריכים ${rangeSummary(range.start, effectiveEnd)}`;
     const wa = `https://wa.me/972${(d.phone || "").replace(/^0/, "")}?text=${encodeURIComponent(
@@ -301,6 +397,9 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
 
         {/* SECTION 2 — identity */}
         <section className="op-sec op-anim" style={{ animationDelay: "80ms" }}>
+          {CATEGORY_LABELS[d.category] && (
+            <span className="op-category">{CATEGORY_LABELS[d.category]}</span>
+          )}
           <h1 className="op-name">{d.title}</h1>
           <p className="op-seller">{sellerLabel}</p>
           <p className="op-price">₪{d.price} <span>/ לערב</span></p>
@@ -326,7 +425,23 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
               );
             })}
           </div>
+          {/* Set size sits with the sizes rather than in the details
+              accordion: for a bridesmaid listing "how many dresses" is part of
+              reading the size row, not a detail to expand for. The per-dress
+              breakdown is in the description, which the publish form asks the
+              lister for explicitly. */}
+          {d.category === "bridesmaid" && d.bridesmaidSetCount > 0 && (
+            <p className="op-setcount">סט של {d.bridesmaidSetCount} שמלות · פירוט המידות בתיאור השמלה</p>
+          )}
           <button type="button" className="op-sizeguide" onClick={() => setSizeGuide(true)}>מה המידה שלי?</button>
+
+          {d.hashtags?.length > 0 && (
+            <div className="op-tags">
+              {d.hashtags.map((tag) => (
+                <span key={tag} className="op-tag">#{tag}</span>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* SECTION 4 — dates */}
@@ -340,7 +455,10 @@ export default function ProductPage({ d, fav, onFav, onClose, toast, similar = [
         <section className="op-sec op-anim" style={{ animationDelay: "320ms" }}>
           <AccordionRow title="פרטי השמלה" open={openAcc === 0} onToggle={() => setOpenAcc(openAcc === 0 ? -1 : 0)}>
             {d.desc && <p>{d.desc}</p>}
+            <p>קטגוריה: {CATEGORY_LABELS[d.category] || "—"}</p>
+            <p>מידות: {dressSizes.join(", ") || "—"}</p>
             <p>צבע: {d.color || "—"}</p>
+            {/* Distinct from קטגוריה above: provenance, not occasion. */}
             <p>מקור: {sellerLabel}</p>
             <p>מצב: {d.condition || "—"}</p>
             <p>אזור: {d.region || "—"}</p>
@@ -567,12 +685,46 @@ const CSS = `
 /* SECTION 1 — gallery */
 .op-gallery{position:relative;width:100%;height:75vh;overflow:hidden;background:${C.cream};}
 .op-gallery-img{width:100%;height:100%;object-fit:cover;object-position:top center;display:block;}
+/* Back + favourite. Bordeaux glyphs, not white.
+
+   White was invisible: at 0.15 opacity the frosted pane barely lifts the
+   photo behind it, so a white icon over a pale dress on a pale backdrop —
+   which is most of this catalogue — had nothing to sit against. Bordeaux is
+   dark enough to hold on its own, and the pane is taken to 0.55 so it reads
+   as a proper frosted chip rather than a tint, giving the glyph a consistent
+   light ground whatever the photo underneath is doing.
+
+   Hover/active shade the glyph rather than only scaling it, so the state is
+   legible without motion (and for anyone on prefers-reduced-motion). */
 .op-glass{position:absolute;top:16px;width:44px;height:44px;border-radius:50%;
-  display:flex;align-items:center;justify-content:center;color:#fff;cursor:pointer;
-  background:rgba(255,255,255,0.15);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  border:1px solid rgba(255,255,255,0.2);box-shadow:0 4px 16px rgba(0,0,0,0.08);
-  transition:transform .2s ease;}
-.op-glass:hover{transform:scale(1.06);}
+  display:flex;align-items:center;justify-content:center;color:${C.bordeaux};cursor:pointer;
+  background:rgba(255,255,255,0.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border:1px solid rgba(107,45,45,0.18);box-shadow:0 4px 16px rgba(0,0,0,0.08);
+  transition:transform .2s ease,background .2s ease,color .2s ease;}
+.op-glass:hover{transform:scale(1.06);background:rgba(255,255,255,0.75);color:${C.bordeauxDeep};}
+.op-glass:active{transform:scale(0.96);background:rgba(255,255,255,0.88);color:${C.bordeauxDeep};}
+.op-glass:focus-visible{outline:2px solid ${C.bordeaux};outline-offset:2px;}
+
+/* Gallery prev/next. Same frosted-glass family as the two buttons above and
+   deliberately square — border-radius:0 is the language of the cards, the
+   category badges and the site's chrome generally; the round back/favourite
+   chips are the exception, not the rule. Taller than wide so the hit area
+   follows the edge of a portrait photo. */
+.op-arrow{position:absolute;top:50%;transform:translateY(-50%);
+  width:40px;height:64px;border-radius:0;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  color:${C.bordeaux};cursor:pointer;
+  background:rgba(255,255,255,0.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border:1px solid rgba(107,45,45,0.18);box-shadow:0 4px 16px rgba(0,0,0,0.08);
+  transition:background .2s ease,color .2s ease;}
+.op-arrow:hover{background:rgba(255,255,255,0.78);color:${C.bordeauxDeep};}
+.op-arrow:active{background:rgba(255,255,255,0.9);color:${C.bordeauxDeep};}
+.op-arrow:focus-visible{outline:2px solid ${C.bordeaux};outline-offset:2px;}
+/* Physical left/right, matching .op-glass-back / .op-glass-fav above — these
+   must not flip with the page's dir=rtl. Previous sits on the right because
+   in an RTL strip the earlier image is the one to the right. */
+.op-arrow-prev{right:16px;}
+.op-arrow-next{left:16px;}
 /* Swapped: back sits top-right, favourite top-left. These are physical
    left/right (not inset-inline) so they don't flip with the page's RTL
    direction — changing the values here is the whole swap, and both buttons
@@ -623,6 +775,10 @@ const CSS = `
   .op-glass{top:20px;}
   .op-glass-back{right:20px;}
   .op-glass-fav{left:20px;}
+  /* Same reasoning for the arrows: .op-gallery shrink-wraps the photo on
+     desktop, so an inset from the section edge IS an inset from the image. */
+  .op-arrow-prev{right:20px;}
+  .op-arrow-next{left:20px;}
 }
 
 /* shared section shell */
@@ -632,6 +788,12 @@ const CSS = `
 .op-h2{font-family:${SERIF};font-size:20px;font-weight:500;color:${C.ink};margin:0 0 16px;}
 
 /* SECTION 2 — identity */
+/* Category badge. Square corners, matching the grid card's own badge and the
+   sharp-cornered language of the cards themselves — a property of the dress,
+   not a transient UI state, so it does not get the rounded/glass treatment. */
+.op-category{display:inline-block;font-family:${UI};font-size:10px;font-weight:500;
+  letter-spacing:2px;background:${C.ink};color:${C.cream};border-radius:0;
+  padding:4px 10px;margin:0 0 10px;}
 .op-name{font-family:${SERIF};font-size:26px;font-weight:500;color:${C.ink};margin:0;line-height:1.2;}
 .op-seller{font-family:${UI};font-size:11px;font-weight:400;text-transform:uppercase;
   letter-spacing:2px;color:${C.muted};margin:8px 0 0;}
@@ -657,6 +819,13 @@ const CSS = `
   cursor:not-allowed;background:${C.white};}
 .op-sizeguide{margin-top:14px;background:none;border:none;padding:0;cursor:pointer;
   font-family:${UI};font-size:12px;color:${C.fuchsia};text-decoration:underline;}
+/* Bridesmaid set size — reads as a note on the size row above it. */
+.op-setcount{font-family:${UI};font-size:12px;color:${C.subtle};margin:12px 0 0;}
+/* Hashtag chips: square, hairline, muted. Decoration, not navigation — they
+   are not clickable yet, and will not be until the tag pages exist. */
+.op-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:16px;}
+.op-tag{font-family:${UI};font-size:11px;color:${C.subtle};border:1px solid ${C.divider};
+  border-radius:0;padding:4px 8px;}
 
 /* SECTION 4 — calendar */
 .op-cal{max-width:360px;margin:0 auto;}
