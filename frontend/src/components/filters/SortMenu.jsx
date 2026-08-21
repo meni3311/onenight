@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Icon } from "../ui/Icon.jsx";
 import { COLORS } from "../../constants/theme.js";
 
-/* [key, label] pairs — order here is the order shown in the menu. */
 export const SORT_OPTIONS = [
   ["price_asc", "מחיר: מהנמוך לגבוה"],
   ["price_desc", "מחיר: מהגבוה לנמוך"],
@@ -10,10 +9,6 @@ export const SORT_OPTIONS = [
   ["oldest", "הישנות ביותר"],
 ];
 
-/* Floating sort trigger, styled to match FilterSidebar's own floating
-   trigger exactly (same glass background/blur/border/shadow, same pill
-   shape and size) so the two sit together as a visual pair. Rendered as a
-   child of FilterSidebar, which positions/fades both together. */
 export function SortMenu({ sort, setSort }) {
   const [open, setOpen] = useState(false);
   const active = SORT_OPTIONS.find(([key]) => key === sort);
@@ -52,7 +47,7 @@ export function SortMenu({ sort, setSort }) {
 
       {open && (
         <>
-          {/* click-outside catcher */}
+          {}
           <div className="fixed inset-0 z-[59]" onClick={() => setOpen(false)} />
           <div
             role="menu"

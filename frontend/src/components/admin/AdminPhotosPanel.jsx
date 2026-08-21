@@ -8,39 +8,17 @@ import {
 import { ImageUploader } from "../ui/ImageUploader.jsx";
 import { ConfirmModal } from "../ui/ConfirmModal.jsx";
 
-/* Admin-only photo management for one listing: add a photo, remove a photo,
-   and turn existing photos into AI on-model shots.
-
-   Every action here writes to the server immediately — there is no separate
-   draft-and-save panel anymore, this is the only place an admin manages a
-   listing's images. It addresses images by id, which a flat URL list can't
-   express.
-
-   The first photo in the grid is the listing's cover (lowest `order`), which
-   is why removing one re-packs the ordering server-side rather than leaving a
-   hole — see DressesService.removeImage. */
-
-/* Mirrors the backend's own cap (AiGenerateDto.ArrayMaxSize) so the admin gets
-   told before spending a round-trip on a request that will 400. The number
-   comes from the AI provider's 6-concurrent-prediction ceiling — change it in
-   both places or not at all. */
 const MAX_PER_RUN = 6;
 
-/* Mirrors MAX_GALLERY_IMAGES in dresses.service.ts. The server re-checks it;
-   this copy exists so the uploader can refuse a too-large drop up front and
-   explain why, instead of firing uploads that the append call will reject. */
 const MAX_GALLERY = 8;
 
 export function AdminPhotosPanel({ dress, adminPw, onUpdated, toast }) {
   const [selected, setSelected] = useState([]);
-  // Ids currently mid-generation — drives the per-thumbnail spinner. A Set
-  // would be tidier but arrays keep the state updates plainly immutable.
   const [busy, setBusy] = useState([]);
   const [errors, setErrors] = useState({});
-  const [removing, setRemoving] = useState(null); // photo pending confirmation
+  const [removing, setRemoving] = useState(null);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [adding, setAdding] = useState(false);
-  // Ids currently mid-download — mirrors `busy`, just for the download action.
   const [downloading, setDownloading] = useState([]);
 
   const photos = dress.photos || [];
@@ -65,13 +43,6 @@ export function AdminPhotosPanel({ dress, adminPw, onUpdated, toast }) {
     );
   };
 
-  /* ── Add ───────────────────────────────────────────────────────────────
-     ImageUploader is reused rather than reimplemented — it already owns the
-     drag-and-drop, the MIME/size validation and the upload call. It's built
-     around a draft `string[]`, so it's driven here with a permanently empty
-     array and a setter that intercepts each newly uploaded URL and posts it
-     straight to the gallery. `max` is the remaining room, not the total, so
-     its own cap logic still refuses an oversized multi-file drop. */
   const appendUploaded = async (updater) => {
     const next = typeof updater === "function" ? updater([]) : updater;
     const urls = next || [];
@@ -79,12 +50,6 @@ export function AdminPhotosPanel({ dress, adminPw, onUpdated, toast }) {
 
     setAdding(true);
     try {
-      // Sequential, not Promise.all. Each append responds with the whole
-      // dress as it stood after that insert; run in parallel, the last
-      // response to arrive wins and can be one that was read before a
-      // sibling's insert landed — rendering a gallery missing an image that
-      // is actually in the database. Awaiting in turn makes the last
-      // response the newest by construction.
       for (const url of urls) {
         const fresh = await adminAddDressImage(dress.id, url, adminPw);
         onUpdated(fresh);
@@ -96,15 +61,12 @@ export function AdminPhotosPanel({ dress, adminPw, onUpdated, toast }) {
     }
   };
 
-  /* ── Remove ─────────────────────────────────────────────────────────── */
   const confirmRemove = async () => {
     if (removeBusy) return;
     setRemoveBusy(true);
     try {
       const fresh = await adminRemoveDressImage(dress.id, removing.id, adminPw);
       onUpdated(fresh);
-      // Drop it from the AI selection too, or the next generate call would
-      // send an id the dress no longer has and 400 the whole batch.
       setSelected((p) => p.filter((x) => x !== removing.id));
       setRemoving(null);
       toast("התמונה נמחקה");
@@ -115,12 +77,6 @@ export function AdminPhotosPanel({ dress, adminPw, onUpdated, toast }) {
     }
   };
 
-  /* ── Download ───────────────────────────────────────────────────────────
-     Fetched and saved as a blob rather than a plain `<a href download>` —
-     the images live on Cloudflare R2's own public origin, and browsers ignore
-     the `download` attribute on a cross-origin link and just navigate to it
-     instead of saving. Fetching the bytes ourselves and handing the browser
-     an object URL forces an actual save regardless of origin. */
   const downloadImage = async (photo, index) => {
     if (downloading.includes(photo.id)) return;
     setDownloading((p) => [...p, photo.id]);
@@ -147,7 +103,6 @@ export function AdminPhotosPanel({ dress, adminPw, onUpdated, toast }) {
     }
   };
 
-  /* ── Generate ───────────────────────────────────────────────────────── */
   const generate = async () => {
     if (!selected.length || running) return;
     const batch = selected;
@@ -164,12 +119,9 @@ export function AdminPhotosPanel({ dress, adminPw, onUpdated, toast }) {
         else failed[r.sourceImageId] = r.error || "יצירת התמונה נכשלה";
       }
       setErrors(failed);
-      // Keep the failures selected so a retry is one click; drop the rest.
       setSelected(batch.filter((id) => failed[id]));
 
       if (ok > 0) {
-        // The endpoint returns per-image statuses, not the dress, so re-read
-        // it to pick up the new photos with their ids and ordering.
         const fresh = await api("/api/dresses/" + dress.id);
         onUpdated(fresh);
         toast(
@@ -180,8 +132,6 @@ export function AdminPhotosPanel({ dress, adminPw, onUpdated, toast }) {
       }
       if (ok === 0) toast("יצירת התמונות נכשלה — ראי פירוט על התמונות");
     } catch (e) {
-      // Request-level failure (wrong password, dress gone, network) — no
-      // per-image detail to show, so surface it once.
       toast("יצירת התמונות נכשלה: " + e.message);
     } finally {
       setBusy([]);
@@ -234,8 +184,7 @@ export function AdminPhotosPanel({ dress, adminPw, onUpdated, toast }) {
                   )}
                 </button>
 
-                {/* Siblings of the thumb button, not children — a button
-                    inside a button is invalid and swallows the inner click. */}
+                {}
                 <button
                   type="button"
                   className="ai-thumb-download"

@@ -1,15 +1,5 @@
 import { MailMessage } from '../common/mail.service';
 
-/* ============================================================================
-   The two emails a moderation decision sends the person who listed the dress.
-
-   Sent from DressesService.updateStatus.
-
-   Markup style follows OtpService.emailTemplate: tables, inline styles, no
-   external CSS — the set of clients that render a modern stylesheet is not
-   the set of clients people read mail in.
-============================================================================ */
-
 const CREAM = '#FAF6F1';
 const BORDEAUX = '#6B2D2D';
 const DARK = '#2A1F1F';
@@ -17,21 +7,11 @@ const ROSE = '#C4A0A0';
 const MUTED = '#9b8d88';
 const HAIRLINE = '#ece2dd';
 
-/**
- * Where the seller should be sent to see their listing.
- *
- * `/#dress=<id>` is a real route: App.jsx resolves that hash on mount and
- * opens the listing over the homepage (see DRESS_HASH_RE there). It has to be
- * an absolute URL with a host the recipient's mail client can open, which is
- * what FRONTEND_URL is for — the local default is the Vite dev server, and
- * production sets it to the deployed origin.
- */
 export function listingUrl(dressId: string): string {
   const base = (process.env.FRONTEND_URL || 'http://localhost:5173').trim().replace(/\/+$/, '');
   return `${base}/#dress=${encodeURIComponent(dressId)}`;
 }
 
-/** Shared chrome: logo header, body slot, footer. */
 function shell(bodyHtml: string): string {
   return `<!DOCTYPE html>
 <html lang="he" dir="rtl">
@@ -56,18 +36,10 @@ function shell(bodyHtml: string): string {
 </html>`;
 }
 
-/** Square-cornered bordeaux button, matching the site's own CTA treatment. */
 function button(href: string, label: string): string {
   return `<a href="${href}" style="display:inline-block;background:${BORDEAUX};color:#ffffff;text-decoration:none;font-size:14px;letter-spacing:.06em;padding:13px 34px;">${label}</a>`;
 }
 
-/**
- * Escape user-controlled strings before they go into the HTML body.
- *
- * `title` and `rejectReason` are both free text someone typed into a form —
- * the lister's dress title and the admin's rejection note. Interpolating
- * either raw would let a stray `<` mangle the layout at best.
- */
 function esc(value: string | null | undefined): string {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -82,7 +54,6 @@ export interface DressMailContext {
   rejectReason?: string | null;
 }
 
-/** "Your dress is live" — sent when an admin moves a listing to `approved`. */
 export function approvedMail(to: string, dress: DressMailContext): MailMessage {
   const url = listingUrl(dress.id);
   const title = esc(dress.title);
@@ -122,7 +93,6 @@ export function approvedMail(to: string, dress: DressMailContext): MailMessage {
   };
 }
 
-/** "Not approved, here's why" — sent when an admin moves a listing to `rejected`. */
 export function rejectedMail(to: string, dress: DressMailContext): MailMessage {
   const title = esc(dress.title);
   const reason = (dress.rejectReason || '').trim();

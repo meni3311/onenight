@@ -1,7 +1,3 @@
-/* ============================================================
-   Root App — onenight dress rental marketplace (Hebrew RTL).
-   Owns routing + shared state; delegates rendering to pages.
-   ============================================================ */
 import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 import { api, browseDresses, getDress, getDressesByIds } from "./lib/api.js";
 import { purgeLegacyDressStorage } from "./lib/data.js";
@@ -14,13 +10,6 @@ import { Footer } from "./components/layout/Footer.jsx";
 import { Toast } from "./components/ui/Toast.jsx";
 import HomePage from "./pages/HomePage.jsx";
 
-/* Route-level code splitting. HomePage stays in the initial chunk because
-   it *is* the first paint; every other route is fetched on demand.
-   The two that matter most for bundle size pull heavy transitive deps
-   along with them: AccountPage owns DressAvailabilityCalendar, which drags
-   in react-day-picker + date-fns, and AdminPage owns AdminPhotosPanel.
-   Neither is reachable without a deliberate click, so neither belongs in
-   the bundle every first-time visitor downloads. */
 const ProductPage = lazy(() => import("./pages/ProductPage.jsx"));
 const FavoritesPage = lazy(() => import("./pages/FavoritesPage.jsx"));
 const PublishPage = lazy(() => import("./pages/PublishPage.jsx"));
@@ -31,8 +20,6 @@ const AdminPage = lazy(() => import("./pages/AdminPage.jsx"));
 const TermsPage = lazy(() => import("./pages/TermsPage.jsx"));
 const ContactPage = lazy(() => import("./pages/ContactPage.jsx"));
 
-/* Reuses the existing .empty / .page styling rather than introducing a new
-   loading treatment, so a chunk fetch looks like the rest of the app. */
 function RouteFallback() {
   return (
     <div className="container page pt-[50px]">
@@ -41,31 +28,14 @@ function RouteFallback() {
   );
 }
 
-/* Routes reachable via a real URL hash (bookmarkable / open-in-new-tab),
-   same pattern the admin panel already uses (see README: /#admin). The
-   registration form's terms link opens /#terms in a new tab this way,
-   rather than needing its own modal-on-modal treatment. */
 const HASH_ROUTES = new Set(["admin", "terms", "contact"]);
 const routeFromHash = () => {
   const h = location.hash.replace("#", "");
   return HASH_ROUTES.has(h) ? h : "home";
 };
 
-/* Deep link to a single listing: /#dress=<id>.
-   This is the link the backend puts in the "your dress was approved" email
-   (see MailService / DressesService.updateStatus), so it has to survive
-   being opened cold in a new tab from an inbox — no app state, no prior
-   navigation. It isn't a HASH_ROUTE because it doesn't select a route: the
-   dress page is an overlay App renders on top of whatever route is showing,
-   so this resolves to the homepage with a listing open, exactly as if the
-   card had been clicked. Unknown ids fall through to a toast. */
 const DRESS_HASH_RE = /^#dress=(.+)$/;
 
-/* Bridges AccountPage (legacy phone/password-shaped `user`) onto the live
-   OTP session from AuthContext, since AccountPage is otherwise only ever
-   reachable through the old, now-unused phone/password login flow. Must be
-   its own component (rendered inside <AuthProvider>) so it can call useAuth() —
-   App itself renders the provider and can't consume its own context. */
 function AccountRoute({ user, setUser, initialTab, ...pageProps }) {
   const { isLoggedIn, account, setAccount } = useAuth();
 
@@ -93,12 +63,6 @@ function AccountRoute({ user, setUser, initialTab, ...pageProps }) {
   return <AccountPage user={mergedUser} setUser={setMergedUser} initialTab={initialTab} {...pageProps} />;
 }
 
-/* Route-level guard for /publish. The click-time gate (navbar CTA, Footer
-   link) already routes signed-out clicks to the auth modal instead of here,
-   but the route itself is otherwise unprotected — this covers anyone who
-   still lands on "publish" some other way (back/forward navigation, a
-   stale link) by bouncing them to the same auth modal rather than showing
-   the form. PublishPage itself is untouched. */
 function PublishRoute(props) {
   const { isLoggedIn, openAuth } = useAuth();
 
@@ -117,22 +81,10 @@ function PublishRoute(props) {
   return <PublishPage {...props} />;
 }
 
-/* How long to wait after the last filter change before asking the server.
-
-   Filtering is a request now, not an array pass, and the price control is a
-   range input that fires on every pixel of a drag — without this, one drag is
-   dozens of queries. Chip clicks pay the same 250ms, which is under the
-   threshold where a control feels unresponsive. The very first load skips it
-   entirely (see the ref below): that request is the homepage's first paint and
-   has nothing to debounce against. */
 const FILTER_DEBOUNCE_MS = 250;
 
 export default function App() {
   const [route, setRoute] = useState(routeFromHash);
-  /* One page of approved listings — NOT the catalogue. Anything that needs a
-     different slice (the owner's own listings, the moderation queue,
-     favourites) asks for that slice itself rather than filtering this
-     array. */
   const [dresses, setDresses] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -144,31 +96,17 @@ export default function App() {
   const [authMode, setAuthMode] = useState("login");
   const [accountTab, setAccountTab] = useState("ads");
   const [filters, setFilters] = useState({ ...EMPTY_FILTERS });
-  /* null = no sort applied (default) — there's no enforced sort today either;
-     the array order is just insertion order (SEED order, with newly
-     published dresses prepended), so this doesn't change existing behavior. */
   const [sort, setSort] = useState(null);
   const [toastMsg, toast] = useToast();
 
-  /* Clear the pre-Postgres mock listings out of this browser before the
-     first load, so a stale cache can never be mistaken for API data during
-     that first render. The browse fetch itself is the effect below. */
   useEffect(() => {
     purgeLegacyDressStorage();
   }, []);
 
-  /* The filters and sort, as the query string the server will answer.
-     Memoized so the fetch effect keys on the string rather than on `filters`
-     object identity — setFilters replaces the object on every keystroke of a
-     slider drag, but most of those produce the same query. */
   const browseQuery = useMemo(() => filtersToQuery(filters, sort, 1), [filters, sort]);
 
-  /* Skips the debounce for the first request only — see FILTER_DEBOUNCE_MS. */
   const firstLoad = useRef(true);
 
-  /* Page 1 whenever the filters or the sort change. Both are server-side now,
-     so a filter change is a refetch, and it resets paging: page 3 of "red
-     dresses under ₪300" has nothing to do with page 3 of the unfiltered list. */
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -178,9 +116,6 @@ export default function App() {
     const t = setTimeout(async () => {
       try {
         const res = await browseDresses(browseQuery);
-        /* A slower earlier request must not overwrite a newer one's results.
-           Clearing the flag in cleanup means only the latest effect run can
-           still write to state. */
         if (cancelled) return;
         setDresses(res?.items || []);
         setTotal(res?.total || 0);
@@ -197,9 +132,6 @@ export default function App() {
 
   const hasMore = dresses.length < total;
 
-  /* Append the next page. The grid grows rather than replacing itself — the
-     cards have a staggered reveal animation and a page-number pager would
-     replay it from the top on every click. */
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
     const next = page + 1;
@@ -216,10 +148,6 @@ export default function App() {
     }
   }, [filters, sort, page, hasMore, loadingMore, toast]);
 
-  /* Warm the ProductPage chunk once the browser is idle. It's lazy so it
-     stays off the critical path, but opening a dress is the single most
-     likely next action from the homepage — without this, the first card
-     click would pay a network round-trip before the modal appears. */
   useEffect(() => {
     const warm = () => import("./pages/ProductPage.jsx");
     if ("requestIdleCallback" in window) {
@@ -235,11 +163,6 @@ export default function App() {
     return () => window.removeEventListener("hashchange", h);
   }, []);
 
-  /* Resolve /#dress=<id> into an open listing — see DRESS_HASH_RE. Runs on
-     mount (the cold-from-an-email case) and on hashchange, so pasting the
-     link into the address bar of an already-open tab works too. The fetch is
-     getDress rather than a lookup in `dresses`: that array is one page of
-     approved listings and the linked dress may well not be on it. */
   useEffect(() => {
     const openFromHash = () => {
       const m = DRESS_HASH_RE.exec(location.hash);
@@ -255,23 +178,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Hide the viewport scrollbar on the homepage only (see the
-     .hide-viewport-scrollbar rules in styles.css). The class goes on
-     <html> rather than a wrapper div because the homepage has no scroll
-     container of its own — the document scrolls, so the scrollbar belongs
-     to the viewport. Other routes share that same scrollbar and keep it,
-     hence the toggle. Cleanup on unmount so the class can't outlive the
-     app during hot reloads. */
   useEffect(() => {
     const el = document.documentElement;
     el.classList.toggle("hide-viewport-scrollbar", route === "home");
     return () => el.classList.remove("hide-viewport-scrollbar");
   }, [route]);
 
-  /* These are passed down through the whole tree, so a fresh identity
-     on every render defeats React.memo on anything below them (notably
-     ProductCard, which is on screen once per listing). setFavIds/setRoute
-     are useState setters and stable, so the dependency lists are honest. */
   const toggleFav = useCallback(
     (id) => setFavIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id])),
     [setFavIds],
@@ -279,11 +191,6 @@ export default function App() {
   const go = useCallback((r) => {
     setRoute(r);
     window.scrollTo({ top: 0 });
-    /* Keep the URL honest about where we are: the hash follows the route in
-       both directions, so /#dress=abc can't sit in the address bar while the
-       contact page is on screen and a reload lands where you actually are.
-       replaceState does not fire `hashchange`, so this can't feed back into
-       the listener above. */
     if (HASH_ROUTES.has(r)) {
       if (location.hash !== `#${r}`) history.replaceState(null, "", `#${r}`);
     } else if (location.hash) {
@@ -294,15 +201,6 @@ export default function App() {
   const onAuth = (u) => { setUser(u); setRoute("account"); toast("ברוכה הבאה, " + u.name + " 🌸"); };
   const logout = () => { setUser(null); go("home"); toast("התנתקת בהצלחה"); };
 
-  /* Rethrows after toasting. The toast is this function's job (it owns the
-     app-level error surface), but PublishPage needs to know the call failed
-     so it can clear its submit-button spinner and let the user retry —
-     swallowing the error here left the button stuck spinning forever. */
-  /* A new listing starts as "pending" (see the schema default), so it does
-     NOT belong in the browse list — that list is approved-only now, and
-     prepending here would have shown the author an unapproved dress sitting
-     in the public gallery. It appears under "השמלות שלי" on the account
-     screen, which fetches the owner's listings at every status. */
   const publish = async (data) => {
     try {
       await api("/api/dresses", { method: "POST", body: data });
@@ -314,12 +212,6 @@ export default function App() {
     }
   };
 
-  /* Favourites are ids in localStorage, resolved server-side: only one page
-     of listings is in the browser, so a local lookup would silently drop
-     every favourite that wasn't on it. Fetched on entering the page rather
-     than on every heart click: `favIds` changes as the user toggles hearts in
-     the grid, and refetching there would be a request per click for a list
-     nothing is currently showing. */
   const [favDresses, setFavDresses] = useState([]);
   const [favLoading, setFavLoading] = useState(false);
 
@@ -332,9 +224,6 @@ export default function App() {
       .catch(() => { if (!cancelled) toast("טעינת המועדפים נכשלה"); })
       .finally(() => { if (!cancelled) setFavLoading(false); });
     return () => { cancelled = true; };
-    /* Deliberately not keyed on favIds — see above. Un-hearting from within
-       the favourites page still removes the card, because FavoritesPage
-       filters what it renders by the live favIds. */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route]);
 
@@ -346,7 +235,7 @@ export default function App() {
         goAccount={(tab) => { setAccountTab(tab); go("account"); }}
       />
 
-      {/* Navbar is fixed; home hero sits behind it, other routes need top clearance */}
+      {}
       {route !== "home" && <div aria-hidden className="h-[72px]" />}
 
       {route === "home" && (
@@ -389,9 +278,7 @@ export default function App() {
           <AuthPage mode={authMode} onAuth={onAuth} goHome={() => go("home")} toast={toast} />
         )}
 
-        {/* Both need listings the public list deliberately excludes — the
-            owner's pending/rejected ones, and the whole moderation queue —
-            so each fetches its own from an endpoint scoped to it. */}
+        {}
         {route === "account" && (
           <AccountRoute
             user={user}
@@ -409,15 +296,9 @@ export default function App() {
         )}
       </Suspense>
 
-      {/* Separate boundary, and deliberately `null`: this is a full-screen
-          overlay, so a centred "loading" card behind it would flash in the
-          page body. The idle prefetch above means the chunk is normally
-          already warm by the time a card is clicked. */}
+      {}
       <Suspense fallback={null}>
-      {/* `d` is the card that was clicked — enough to paint the page
-          immediately. ProductPage fetches the rest itself: the owner's phone
-          (stripped from the public list, and needed by the WhatsApp CTA) and
-          the "you may also like" rail from /api/dresses/:id/similar. */}
+      {}
       {selected && (
         <ProductPage
           d={selected}

@@ -1,8 +1,6 @@
 import { useReveal } from "../../hooks/useReveal.js";
 import { COLORS, ALPHA, FONTS } from "../../constants/theme.js";
 
-/* "קצת עלינו" — short brand intro that fades up on scroll with a stagger.
-   The opacity/transform values depend on `shown`, so they stay inline. */
 export function AboutSection() {
   const [ref, shown] = useReveal(0.2);
   const rise = (delay) => ({
@@ -40,7 +38,7 @@ export function AboutSection() {
           onenight היא מרכז ההשכרה של שמלות הערב בישראל. אנחנו מאמינות שכל אישה מגיעה להרגיש מושלמת, בלי לקנות, בלי לבזבז, רק ללבוש ולזרוח.
         </p>
       </div>
-      {/* divider below section */}
+      {}
       <div style={{ width: "40px", height: "1px", background: COLORS.rose, margin: "48px auto 0" }} />
     </section>
   );

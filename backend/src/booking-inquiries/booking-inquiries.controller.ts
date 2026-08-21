@@ -13,10 +13,6 @@ import { AdminGuard } from '../common/admin.guard';
 import { BookingInquiriesService } from './booking-inquiries.service';
 import { CreateBookingInquiryDto } from './dto/create-booking-inquiry.dto';
 
-// The global 'api' prefix (see main.ts's app.setGlobalPrefix) supplies the
-// leading /api — the frontend's Vite dev proxy only forwards '/api/*' to
-// this server, and that's still true: the full route stays
-// /api/booking-inquiries.
 @ApiTags('booking-inquiries')
 @Controller('booking-inquiries')
 export class BookingInquiriesController {

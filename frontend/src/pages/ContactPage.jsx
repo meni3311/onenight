@@ -2,29 +2,6 @@ import { useState } from "react";
 import { COLORS } from "../constants/theme.js";
 import { submitContactInquiry } from "../lib/api.js";
 
-/* ============================================================================
-   ContactPage — "צור קשר".
-
-   Reached from the navbar side-menu link and the footer, both of which used
-   to scroll back to the top of the homepage. Three stacked blocks, in the
-   order someone actually needs them: how to reach a human right now (email /
-   phone / WhatsApp), the answers to the questions most of those messages
-   would have asked (FAQ), and only then a form — because a form is the
-   slowest of the three and shouldn't be the first thing offered.
-
-   Submissions go to POST /api/contact-inquiries and land in the admin
-   panel's "פניות" tab. Nothing here is emailed to the visitor; the promise
-   in the success state is a human replying, which is what actually happens.
-
-   Square corners, cream/bordeaux/rose, dir=rtl — same language as the rest of
-   the site. Props: `goHome` for the back link.
-============================================================================ */
-
-/* Placeholders until the real details are confirmed — these are the ones the
-   footer has been showing, so the two agree rather than contradicting each
-   other. WhatsApp is the same number as `phone`, in wa.me's international
-   form (leading 0 → 972). Change all three here; the footer reads its own
-   copy and is worth updating alongside. */
 const CONTACT = {
   email: "menicamp@gmail.com",
   phone: "058-6770772",
@@ -56,10 +33,6 @@ const CONTACT_METHODS = [
   },
 ];
 
-/* Placeholder copy — deliberately answering the questions this marketplace
-   actually generates (who holds the dress, who pays for cleaning, what
-   happens if it's damaged) rather than generic filler, so replacing them is
-   an edit rather than a rewrite. */
 const FAQ = [
   {
     q: "איך ההשכרה עובדת?",
@@ -89,11 +62,8 @@ const FAQ = [
 
 const MESSAGE_MAX = 2000;
 
-/* Same shape check the backend DTO applies (class-validator's IsEmail is
-   stricter, but this catches the common typo before a round trip). */
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-/* ------------------------------------------------------------------ FAQ row */
 function FaqRow({ item, open, onToggle }) {
   return (
     <div className="border-b" style={{ borderColor: "rgba(107,45,45,0.14)" }}>
@@ -124,10 +94,7 @@ function FaqRow({ item, open, onToggle }) {
           <path d="M6 9l6 6 6-6" />
         </svg>
       </button>
-      {/* Grid-rows 0fr → 1fr animates to the content's real height without
-          measuring it in JS, which is what the ProductPage accordion has to
-          do with a scrollHeight ref. No ref, no stale measurement after a
-          font swaps in. */}
+      {}
       <div
         style={{
           display: "grid",
@@ -145,23 +112,16 @@ function FaqRow({ item, open, onToggle }) {
   );
 }
 
-/* =========================================================== ContactPage */
 export default function ContactPage({ goHome }) {
   const [openFaq, setOpenFaq] = useState(0);
   const [form, setForm] = useState({ name: "", email: "", message: "" });
   const [errors, setErrors] = useState({});
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
-  /* Server-side failure, shown in place of a toast: this page owns its own
-     submit state and a toast would vanish before someone reading a form has
-     looked up from it. */
   const [submitError, setSubmitError] = useState("");
 
   const set = (k, val) => {
     setForm((p) => ({ ...p, [k]: val }));
-    /* Clear this field's error as soon as it's touched, rather than waiting
-       for the next submit to re-validate — an error that persists while you
-       fix it reads as "still wrong". */
     setErrors((p) => (p[k] ? { ...p, [k]: undefined } : p));
   };
 
@@ -235,7 +195,7 @@ export default function ContactPage({ goHome }) {
         </p>
       </header>
 
-      {/* ---------------------------------------------------- contact details */}
+      {}
       <section className="mb-16">
         <h2
           className="mb-5 font-body text-[11px] uppercase tracking-[0.2em]"
@@ -264,9 +224,7 @@ export default function ContactPage({ goHome }) {
               >
                 {m.label}
               </span>
-              {/* dir=ltr so a phone number or an address isn't reordered by
-                  the surrounding RTL context (058-677 would render as
-                  677-058). Alignment stays start-of-line via text-start. */}
+              {}
               <span
                 dir="ltr"
                 className="mt-2 block break-words text-start font-body text-[15px]"
@@ -280,7 +238,7 @@ export default function ContactPage({ goHome }) {
         </div>
       </section>
 
-      {/* ------------------------------------------------------------- FAQ */}
+      {}
       <section className="mb-16">
         <h2
           className="mb-2 font-body text-[11px] uppercase tracking-[0.2em]"
@@ -294,15 +252,13 @@ export default function ContactPage({ goHome }) {
               key={item.q}
               item={item}
               open={openFaq === i}
-              /* Single-open accordion, and clicking the open row closes it —
-                 matching the details accordion on the dress page. */
               onToggle={() => setOpenFaq(openFaq === i ? -1 : i)}
             />
           ))}
         </div>
       </section>
 
-      {/* ------------------------------------------------------------ form */}
+      {}
       <section>
         <h2
           className="mb-5 font-body text-[11px] uppercase tracking-[0.2em]"

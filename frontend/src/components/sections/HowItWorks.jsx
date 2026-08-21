@@ -1,7 +1,6 @@
 import { useReveal } from "../../hooks/useReveal.js";
 import { COLORS, ALPHA, FONTS } from "../../constants/theme.js";
 
-/* Section-local icons for the three steps. */
 const HowIcon = {
   dress: (p) => (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
@@ -26,7 +25,6 @@ const STEPS = [
   { n: "3", icon: HowIcon.message, title: "תאמי איסוף", desc: "יצרו קשר ישיר עם בעלת השמלה לתיאום המדידה ואיסוף" },
 ];
 
-/* "איך זה עובד" — three-step glass card that fades up on scroll. */
 export function HowItWorks() {
   const [ref, shown] = useReveal(0.2);
   return (

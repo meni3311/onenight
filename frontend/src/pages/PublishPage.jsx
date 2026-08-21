@@ -6,10 +6,6 @@ import { ImageUploader } from "../components/ui/ImageUploader.jsx";
 import { SizeMultiSelect } from "../components/ui/SizeMultiSelect.jsx";
 import { HashtagInput } from "../components/ui/HashtagInput.jsx";
 
-/* `size` became `sizes` (an array) and moved to its own state below, alongside
-   `hashtags` — this object holds the flat string fields the `set()` helper
-   drives, and putting arrays in it would mean cloning them on every keystroke
-   in an unrelated field. */
 const EMPTY_FORM = {
   title: "", desc: "", color: "", condition: "", price: "",
   region: "", city: "", source: "", store: "", phone: "", email: "",
@@ -17,11 +13,8 @@ const EMPTY_FORM = {
 };
 const MAX_IMAGES = 3;
 
-/* Strip everything but digits so "050-1234567" and "050 1234567" validate
-   the same as "0501234567". */
 const normalizePhone = (s) => (s || "").replace(/\D/g, "");
 
-/* Publish-a-dress form with client-side validation and image previews. */
 export default function PublishPage({ onSubmit, goHome }) {
   const { isLoggedIn, account } = useAuth();
   const [v, setV] = useState(() => ({ ...EMPTY_FORM, email: account?.email || "" }));
@@ -29,21 +22,11 @@ export default function PublishPage({ onSubmit, goHome }) {
   const [hashtags, setHashtags] = useState([]);
   const [images, setImages] = useState([]);
   const [errors, setErrors] = useState({});
-  /* Required acknowledgment of the two notice boxes below, replacing the
-     old pre-submit confirm popup — same required-checkbox pattern already
-     used for Terms of Use acceptance in AuthContext.jsx's registration
-     flow, rather than a plain "read-only, no action needed" notice. */
   const [agreeLiability, setAgreeLiability] = useState(false);
   const [agreeFee, setAgreeFee] = useState(false);
-  /* In flight between clicking "פרסום השמלה" and the POST resolving. */
   const [submitting, setSubmitting] = useState(false);
   const set = (k, val) => setV((p) => ({ ...p, [k]: val }));
 
-  /* Ownership is keyed by the account's email (see AccountPage's "my
-     listings" filter) — while signed in, lock the field to that address
-     instead of a free-typed one so the listing reliably shows up under
-     "השמלות שהעליתי" afterwards. Re-syncs if the user logs in mid-visit
-     (the auth modal is reachable from the navbar on every page). */
   useEffect(() => {
     if (isLoggedIn && account?.email) set("email", account.email);
   }, [isLoggedIn, account?.email]);
@@ -53,9 +36,6 @@ export default function PublishPage({ onSubmit, goHome }) {
     if (!v.title.trim()) e.title = "נא להזין כותרת";
     if (!v.desc.trim()) e.desc = "נא להזין תיאור";
     if (!v.category) e.category = "נא לבחור קטגוריה";
-    /* Mirrors the server's rule (resolveBridesmaidSetCount): required only
-       for bridesmaid listings, ignored everywhere else. The field is hidden
-       for other categories, so a stale value can't fail a submit. */
     if (v.category === "bridesmaid") {
       const n = +v.bridesmaidSetCount;
       if (!v.bridesmaidSetCount || !Number.isInteger(n) || n < 2 || n > 20) {
@@ -78,31 +58,11 @@ export default function PublishPage({ onSubmit, goHome }) {
     setErrors(e);
     return Object.keys(e).length === 0;
   };
-  /* No more confirm-popup gate — the two notice boxes below (liability +
-     fee) are read directly on the page and required via their own
-     checkboxes, so a valid submit here goes straight through.
-
-     Awaited so the button can hold a spinner for the round trip. The guard
-     on `submitting` is the real double-submit protection, not the button's
-     `disabled` attribute: Enter-to-submit and a fast double-click can both
-     re-enter this before React has repainted the disabled state, and a
-     duplicate POST here means a duplicate listing in the moderation queue.
-
-     onSubmit rethrows on failure (see App.jsx's publish) — it has already
-     shown the toast, so there's nothing to report here beyond releasing the
-     button. On success it navigates away and this component unmounts, which
-     is why `submitting` is never cleared on the happy path. */
   const submit = async () => {
     if (submitting) return;
     if (!validate()) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     setSubmitting(true);
     try {
-      /* Phone is contact info only — never used to match ownership.
-
-         `bridesmaidSetCount` is sent only for bridesmaid listings and omitted
-         entirely otherwise, rather than sent as null: the DTO runs with
-         `forbidNonWhitelisted`, and an empty-string number field would fail
-         @IsInt before the service ever got to ignore it. */
       await onSubmit({
         ...v,
         sizes,
@@ -128,9 +88,7 @@ export default function PublishPage({ onSubmit, goHome }) {
             <input type="text" placeholder="לדוגמה: שמלת ערב אדומה זוהרת" value={v.title} onChange={(e) => set("title", e.target.value)} />
             {errors.title && <span className="err">{errors.title}</span>}</div>
 
-          {/* Category sits above the description on purpose: choosing
-              "סט שמלות" changes what the description is supposed to contain
-              (see the note below), so the choice has to come first. */}
+          {}
           <div className="field full"><label>קטגוריה</label>
             <div className="chips">
               {CATEGORIES.map((c) => (
@@ -157,11 +115,7 @@ export default function PublishPage({ onSubmit, goHome }) {
               {errors.bridesmaidSetCount && <span className="err">{errors.bridesmaidSetCount}</span>}</div>
           )}
 
-          {/* Bridesmaid sets are several garments under one listing, and the
-              size chips below describe the set as a whole. The per-dress
-              breakdown has nowhere else to go, so the description carries it
-              and this note says so — right above the field it's asking about,
-              rather than as a placeholder that vanishes on first keystroke. */}
+          {}
           {v.category === "bridesmaid" && (
             <div className="field full">
               <div className="notice-box">
@@ -207,9 +161,7 @@ export default function PublishPage({ onSubmit, goHome }) {
           <div className="field"><label>עיר</label>
             <input type="text" placeholder="לדוגמה: תל אביב" value={v.city} onChange={(e) => set("city", e.target.value)} /></div>
 
-          {/* Multi-select now — one physical dress can genuinely fit more than
-              one size. "אחר" reveals a free-text box for anything the list
-              doesn't cover; see SizeMultiSelect. */}
+          {}
           <div className="field full"><label>מידות</label>
             <SizeMultiSelect options={SIZES} value={sizes} onChange={setSizes} />
             {errors.sizes && <span className="err">{errors.sizes}</span>}</div>
@@ -240,8 +192,7 @@ export default function PublishPage({ onSubmit, goHome }) {
             )}
             {errors.email && <span className="err">{errors.email}</span>}</div>
 
-          {/* Optional and free-text — no fixed vocabulary yet, autocomplete
-              comes later. Stored bare, displayed with a "#". */}
+          {}
           <div className="field full"><label>תגיות (לא חובה)</label>
             <HashtagInput value={hashtags} onChange={setHashtags} />
           </div>

@@ -1,6 +1,5 @@
 import { COLORS, FONTS } from "../../constants/theme.js";
 
-/* Pill toggle — translucent when unselected, warm rose-glass when selected. */
 export function Chip({ active, onClick, children }) {
   return (
     <button

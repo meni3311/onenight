@@ -1,10 +1,8 @@
 import { useState } from "react";
 import { api } from "../lib/api.js";
 
-/* Demo SMS verification code. Replace with a real Twilio flow in production. */
 const DEMO_VERIFY_CODE = "1234";
 
-/* Login / register flow. Registration includes a (demo) SMS verification step. */
 export default function AuthPage({ mode: initMode, onAuth, goHome, toast }) {
   const [mode, setMode] = useState(initMode || "login");
   const [v, setV] = useState({ name: "", email: "", city: "", phone: "", password: "" });

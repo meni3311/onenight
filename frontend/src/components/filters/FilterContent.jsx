@@ -15,8 +15,6 @@ import {
   SLEEVE_LENGTH_OPTIONS,
 } from "./filterConstants.js";
 
-/* The grouped filter controls: size, category, price, color (multi-select),
-   source, dress length, sleeve length. */
 export function FilterContent({ f, setF }) {
   const toggleArr = (key, val) =>
     setF((p) => ({
@@ -26,11 +24,7 @@ export function FilterContent({ f, setF }) {
 
   return (
     <div className="flex flex-col">
-      {/* 1 · SIZE — most important.
-          Shares SizeMultiSelect with the publish form, so the "אחר" free-text
-          box behaves identically on both sides of the marketplace: what a
-          lister types there is what a searcher types here to find it. The
-          glass variant matches this panel; the form uses the light one. */}
+      {}
       <FilterSection title="גודל" icon={<Icon.ruler width="15" height="15" />}>
         <SizeMultiSelect
           options={LETTER_SIZES}
@@ -44,9 +38,7 @@ export function FilterContent({ f, setF }) {
         </p>
       </FilterSection>
 
-      {/* 2 · CATEGORY — the occasion. Distinct from "מקור" further down,
-          which is provenance (custom-sewn vs. boutique); a bridal dress can
-          be either, so the two facets compose rather than compete. */}
+      {}
       <FilterSection title="קטגוריה" icon={<Icon.sparkle width="15" height="15" />}>
         <div className="flex flex-wrap gap-2">
           {CATEGORIES.map((c) => (
@@ -61,7 +53,7 @@ export function FilterContent({ f, setF }) {
         </div>
       </FilterSection>
 
-      {/* 2 · PRICE */}
+      {}
       <FilterSection title="מחיר" icon={<Icon.tag width="15" height="15" />}>
         <PriceRange
           min={PRICE.min}
@@ -71,7 +63,7 @@ export function FilterContent({ f, setF }) {
         />
       </FilterSection>
 
-      {/* 3 · COLOR — multi-select frosted-glass pills, each tinted in its own color */}
+      {}
       <FilterSection title="צבע" icon={<Icon.palette width="15" height="15" />}>
         <div className="flex flex-wrap gap-2">
           {COLOR_SWATCHES.map((c) => {
@@ -113,7 +105,7 @@ export function FilterContent({ f, setF }) {
         </div>
       </FilterSection>
 
-      {/* 4 · SOURCE — "הכל" selected by default */}
+      {}
       <FilterSection title="מקור" icon={<Icon.store width="15" height="15" />}>
         <div className="flex flex-wrap gap-2">
           {SOURCE_OPTIONS.map(([v, l]) => (
@@ -124,7 +116,7 @@ export function FilterContent({ f, setF }) {
         </div>
       </FilterSection>
 
-      {/* 5 · DRESS LENGTH — multi-select */}
+      {}
       <FilterSection title="אורך שמלה" icon={<Icon.ruler width="15" height="15" />}>
         <div className="flex flex-wrap gap-2">
           {DRESS_LENGTH_OPTIONS.map((l) => (
@@ -135,7 +127,7 @@ export function FilterContent({ f, setF }) {
         </div>
       </FilterSection>
 
-      {/* 6 · SLEEVE LENGTH — multi-select */}
+      {}
       <FilterSection title="אורך שרוול" icon={<Icon.sparkle width="15" height="15" />}>
         <div className="flex flex-wrap gap-2">
           {SLEEVE_LENGTH_OPTIONS.map((l) => (

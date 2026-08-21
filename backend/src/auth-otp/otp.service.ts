@@ -6,21 +6,11 @@ interface OtpRecord {
   expires: number;
 }
 
-/**
- * Email OTP service.
- *
- * Codes are kept in memory (Map) with a 10-minute expiry — fine for this app.
- * Email delivery uses Resend. The official `resend` SDK is declared in
- * package.json, but to stay runtime-safe even before `npm install`, we call
- * Resend's HTTP API directly (https://api.resend.com/emails) with the API key
- * from RESEND_API_KEY. If no key is configured the code is logged to the
- * console so the flow still works in local dev.
- */
 @Injectable()
 export class OtpService {
   private readonly logger = new Logger('OtpService');
   private readonly store = new Map<string, OtpRecord>();
-  private readonly TTL_MS = 10 * 60 * 1000; // 10 minutes
+  private readonly TTL_MS = 10 * 60 * 1000;
   private readonly from = process.env.RESEND_FROM || 'onenight <onboarding@resend.dev>';
 
   private normalize(email: string): string {
@@ -77,12 +67,11 @@ export class OtpService {
       throw new BadRequestException('קוד שגוי');
     }
 
-    this.store.delete(addr); // single-use
+    this.store.delete(addr);
     const token = randomBytes(24).toString('hex');
     return { success: true, token };
   }
 
-  /** Branded, RTL email body showing the 6-digit code. */
   private emailTemplate(code: string): string {
     return `
 <!DOCTYPE html>

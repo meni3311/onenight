@@ -10,13 +10,10 @@ const OTP_RE = new RegExp(`^\\d{${OTP_LENGTH}}$`);
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 const MIN_PASSWORD_LENGTH = 8;
 
-/* Strip everything but digits so "050-1234567" and "050 1234567" validate
-   the same as "0501234567" — mirrors PublishPage's phone normalization. */
 const normalizePhone = (s) => (s || "").replace(/\D/g, "");
 
 const AuthContext = createContext(null);
 
-/* Shared glass styling for every text input in the modal. */
 const inputStyle = {
   width: "100%",
   background: "rgba(255,255,255,0.1)",
@@ -28,11 +25,6 @@ const inputStyle = {
   textAlign: "right",
 };
 
-/* POST JSON to the backend; throws Error(message) on non-2xx.
-   Routed through withBase() (see lib/api.js) rather than a bare relative
-   fetch — on the deployed split-origin setup (Vercel frontend, Render
-   backend) a relative "/api/..." path would hit Vercel itself, which has
-   no backend, and 404. */
 async function postJson(path, body) {
   const res = await fetch(withBase(path), {
     method: "POST",
@@ -40,7 +32,7 @@ async function postJson(path, body) {
     body: JSON.stringify(body),
   });
   let data = null;
-  try { data = await res.json(); } catch (_) { /* ignore */ }
+  try { data = await res.json(); } catch (_) {  }
   if (!res.ok) {
     const msg = data && (Array.isArray(data.message) ? data.message[0] : data.message || data.error);
     throw new Error(msg || "אירעה שגיאה, נסי שוב");
@@ -52,8 +44,6 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
-/* OTP boxes (count = OTP_LENGTH) with auto-advance + backspace-back behaviour.
-   Boxes flex to fit the modal width while keeping the glass style. */
 function OtpBoxes({ value, onChange }) {
   const refs = useRef([]);
   const cells = Array.from({ length: OTP_LENGTH }, (_, i) => i);
@@ -109,7 +99,6 @@ function OtpBoxes({ value, onChange }) {
   );
 }
 
-/* Filled (primary) pill button. */
 function FilledButton({ children, onClick, disabled }) {
   return (
     <button
@@ -126,7 +115,6 @@ function FilledButton({ children, onClick, disabled }) {
   );
 }
 
-/* Back arrow (lucide ArrowRight equivalent) — top-right, returns to prev view. */
 function BackArrow({ onClick }) {
   return (
     <button
@@ -143,7 +131,6 @@ function BackArrow({ onClick }) {
   );
 }
 
-/* Small inline error line. */
 function ErrorLine({ message }) {
   if (!message) return null;
   return (
@@ -153,8 +140,6 @@ function ErrorLine({ message }) {
   );
 }
 
-/* Small inline positive/info line (e.g. "password updated") — same slot as
-   ErrorLine but in the palette's neutral-positive rose tone. */
 function NoticeLine({ message }) {
   if (!message) return null;
   return (
@@ -164,15 +149,6 @@ function NoticeLine({ message }) {
   );
 }
 
-/* Login's in-card status slot — swaps in for the form while the request is
-   in flight, then again on success, before the modal closes. No boxed
-   background here (that was a mismatched white/cream card against the
-   modal's own dark glass) — sits directly on the modal's existing
-   background like every other view (form, choice, etc. below), just with
-   text colors matching the modal's own white/rose palette instead of the
-   dark-on-cream pairing that needed the box to stay readable. The bordeaux
-   spinner ring is still the brand accent color, per spec — it just isn't
-   sitting inside its own frame anymore. */
 function LoginStatusCard({ stage }) {
   const loading = stage === "loading";
   return (
@@ -198,7 +174,6 @@ function LoginStatusCard({ stage }) {
   );
 }
 
-/* Text-link style shared by "לא קיבלתי קוד" / "שכחתי סיסמה". */
 function TextLink({ onClick, children, center }) {
   return (
     <button
@@ -212,11 +187,6 @@ function TextLink({ onClick, children, center }) {
   );
 }
 
-/* Registration consent row. A nested <a> inside the <label> still opens its
-   own link on click rather than toggling the checkbox — that's standard
-   label-activation behavior, so no extra event handling is needed here.
-   `error` just switches the box's border to the same red used by ErrorLine,
-   for the required Terms & Privacy checkbox when submitted unchecked. */
 function Checkbox({ checked, onChange, error, children }) {
   return (
     <label
@@ -245,28 +215,12 @@ function Checkbox({ checked, onChange, error, children }) {
 }
 
 export function AuthProvider({ go, children }) {
-  /* Simulated session — flips to true once login/registration succeeds.
-     Persisted to localStorage (read synchronously on mount, same as
-     `favIds`/the legacy `user` state — see useLocalStorage) so a page
-     refresh doesn't drop the session. There's no bearer token in this app
-     (the mock/real login endpoints just return { name, email }, nothing
-     else checks a token on requests), so `isLoggedIn` + `account` together
-     *are* the session — persisting them is the fix, not a separate token. */
   const [isLoggedIn, setIsLoggedIn] = useLocalStorage("onenight_logged_in", false);
-  /* Signed-in account's display info, captured from the auth flow.
-     { name, email } — set on successful login/registration, cleared on logout. */
   const [account, setAccount] = useLocalStorage("onenight_account", null);
   const [authOpen, setAuthOpen] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
-  /* What triggered the current auth flow — "publish" if it should land the
-     user on /publish once they're verified, null for every other caller
-     (e.g. the dress-detail booking gate), which should just close the
-     modal and leave the caller's page/state exactly as it was. */
   const [authIntent, setAuthIntent] = useState(null);
 
-  /* Internal modal flow.
-     view ∈ choice | loginForm | forgotForm | forgotOtp | resetForm
-          | regForm | regOtp */
   const [view, setView] = useState("choice");
   const [slideDir, setSlideDir] = useState("fwd");
 
@@ -278,15 +232,8 @@ export function AuthProvider({ go, children }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [otp, setOtp] = useState("");
-  /* The forgot-password code, captured off `otp` the moment it's confirmed
-     valid in continueToReset(). goView() always clears `otp` on every
-     transition (so OTP-entry screens start blank) — resetForm doesn't
-     re-collect the code, so without this it was silently submitting "" to
-     reset-password on every attempt. */
   const [resetCode, setResetCode] = useState("");
 
-  /* Registration consent — Terms & Privacy is required (blocks submit while
-     unchecked); marketing is opt-out, defaulting to checked. */
   const [agreedTerms, setAgreedTerms] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState(true);
   const [termsError, setTermsError] = useState(false);
@@ -294,17 +241,10 @@ export function AuthProvider({ go, children }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  /* loginForm's own status slot: "form" (default) | "loading" | "success".
-     Swaps the form fields for a spinner, then a welcome confirmation, in
-     the same card — no existing spinner component to reuse (checked:
-     there isn't one anywhere in the app), and the existing welcomeOpen
-     popup below navigates/closes *before* it appears, which is the wrong
-     order for "show welcome, then navigate". */
   const [loginStage, setLoginStage] = useState("form");
 
   useBodyScrollLock(authOpen || welcomeOpen);
 
-  /* Welcome popup auto-dismisses; still closable by hand. */
   useEffect(() => {
     if (!welcomeOpen) return;
     const t = setTimeout(() => setWelcomeOpen(false), 3500);
@@ -335,7 +275,6 @@ export function AuthProvider({ go, children }) {
   const openAuth = (intent = null) => { resetFlow(); setAuthIntent(intent); setAuthOpen(true); };
   const closeAuth = () => setAuthOpen(false);
 
-  /* Transition to another view; clears OTP entry + messages between screens. */
   const goView = (next, direction = "fwd") => {
     setSlideDir(direction);
     setOtp("");
@@ -354,14 +293,11 @@ export function AuthProvider({ go, children }) {
     }
   };
 
-  /* Clears the session; navigation back to the homepage is the caller's job. */
   const logout = () => {
     setIsLoggedIn(false);
     setAccount(null);
   };
 
-  /* Re-send an OTP to the current email without leaving the current view
-     (used by both the registration and forgot-password OTP screens). */
   const sendCode = async (nextView) => {
     if (busy) return;
     setError("");
@@ -375,8 +311,6 @@ export function AuthProvider({ go, children }) {
       setBusy(false);
     }
   };
-
-  /* ── Registration ── */
 
   const submitRegister = async () => {
     if (busy) return;
@@ -392,9 +326,6 @@ export function AuthProvider({ go, children }) {
     setTermsError(false);
     setBusy(true);
     try {
-      // 1) Create the (unverified) account — password is hashed server-side,
-      //    the plaintext never leaves this request. No username field in
-      //    this form; the backend derives a display-only handle on its own.
       await postJson("/api/auth/register", {
         name: name.trim(),
         email: email.trim(),
@@ -402,7 +333,6 @@ export function AuthProvider({ go, children }) {
         password,
         marketingConsent,
       });
-      // 2) Reuse the existing OTP integration to email a verification code.
       await postJson("/api/auth/send-otp", { email: email.trim() });
       goView("regOtp", "fwd");
     } catch (e) {
@@ -412,8 +342,6 @@ export function AuthProvider({ go, children }) {
     }
   };
 
-  /* "סיימתי, בואו נתחיל!" — verifies the OTP and flips the account to
-     verified in one correlated backend call, then logs the user in. */
   const finishRegisterVerify = async () => {
     if (busy) return;
     if (!OTP_RE.test(otp)) { setError(`יש להזין קוד בן ${OTP_LENGTH} ספרות`); return; }
@@ -421,16 +349,9 @@ export function AuthProvider({ go, children }) {
     setBusy(true);
     try {
       const user = await postJson("/api/auth/verify-registration", { email: email.trim(), code: otp });
-      // id + phone: the backend's response already includes both (see
-      // UsersService.strip — everything but the password hash), they just
-      // weren't being kept before. Needed so features like the booking
-      // inquiry log can identify/contact the logged-in renter without a
-      // second round trip.
       setAccount({ name: user.name, email: user.email, id: user.id, phone: user.phone });
       setIsLoggedIn(true);
       closeAuth();
-      // Only the publish flow forces a navigation — every other caller
-      // (e.g. booking) should land back exactly where the modal was opened.
       if (authIntent === "publish") go("publish");
       setWelcomeOpen(true);
     } catch (e) {
@@ -439,8 +360,6 @@ export function AuthProvider({ go, children }) {
       setBusy(false);
     }
   };
-
-  /* ── Login (email + password) ── */
 
   const submitLogin = async () => {
     if (busy) return;
@@ -451,12 +370,9 @@ export function AuthProvider({ go, children }) {
     setLoginStage("loading");
     try {
       const user = await postJson("/api/auth/login", { email: email.trim(), password });
-      // id + phone: see the matching comment in finishRegisterVerify above.
       setAccount({ name: user.name, email: user.email, id: user.id, phone: user.phone });
       setIsLoggedIn(true);
       setLoginStage("success");
-      // Hold the welcome confirmation on screen briefly before navigating —
-      // requirement is spinner → welcome → *then* the app, in that order.
       setTimeout(() => {
         closeAuth();
         if (authIntent === "publish") go("publish");
@@ -469,15 +385,12 @@ export function AuthProvider({ go, children }) {
     }
   };
 
-  /* ── Forgot password ── */
-
   const submitForgot = async () => {
     if (busy) return;
     if (!EMAIL_RE.test(email.trim())) { setError("כתובת מייל לא תקינה"); return; }
     setError("");
     setBusy(true);
     try {
-      // Reuses the same send-otp endpoint as registration — no second OTP system.
       await postJson("/api/auth/send-otp", { email: email.trim() });
       goView("forgotOtp", "fwd");
     } catch (e) {
@@ -487,10 +400,6 @@ export function AuthProvider({ go, children }) {
     }
   };
 
-  /* Entering the code is just a UI transition here — the code itself is
-     verified server-side together with the new password in one call, so
-     there's no single-use code to burn early. Captured into `resetCode`
-     because goView() below clears `otp`, and resetForm never re-collects it. */
   const continueToReset = () => {
     if (!OTP_RE.test(otp)) { setError(`יש להזין קוד בן ${OTP_LENGTH} ספרות`); return; }
     setResetCode(otp);
@@ -517,7 +426,6 @@ export function AuthProvider({ go, children }) {
     }
   };
 
-  /* ── View renderers ── */
   const renderView = () => {
     switch (view) {
       case "loginForm":
@@ -743,7 +651,7 @@ export function AuthProvider({ go, children }) {
       default:
         return (
           <div className="flex flex-col items-center" style={{ gap: "20px" }}>
-            {/* Lock icon */}
+            {}
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#C4A0A0" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="block">
               <rect x="5" y="11" width="14" height="10" rx="2" />
               <path d="M8 11V7a4 4 0 0 1 8 0v4" />
@@ -787,17 +695,13 @@ export function AuthProvider({ go, children }) {
     <AuthContext.Provider value={{ isLoggedIn, account, setAccount, openAuth, requestPublish, closeAuth, logout }}>
       {children}
 
-      {/* ── Auth modal (glassmorphism) — internal multi-view flow ── */}
+      {}
       <div
         onClick={closeAuth}
         aria-hidden={!authOpen}
         style={{
           position: "fixed",
           inset: 0,
-          /* Must outrank the dress-detail overlay (ProductPage's .op-root
-             is z-index:120, with its own inner modals at 140) so this modal
-             is still visible/clickable when opened from the booking gate
-             there — 150 clears both while staying under the toast (200). */
           zIndex: 150,
           display: "flex",
           alignItems: "center",
@@ -856,7 +760,7 @@ export function AuthProvider({ go, children }) {
               : "opacity 0.2s ease-in, transform 0.2s ease-in",
           }}
         >
-          {/* Close (X) — top-left corner */}
+          {}
           <button
             type="button"
             onClick={closeAuth}
@@ -867,14 +771,14 @@ export function AuthProvider({ go, children }) {
             <Icon.close width="18" height="18" className="block" />
           </button>
 
-          {/* Animated view container — re-mounts per view to replay the slide */}
+          {}
           <div key={view} style={{ animation: `${slideDir === "fwd" ? "authFwd" : "authBack"} 0.25s ease-out` }}>
             {renderView()}
           </div>
         </div>
       </div>
 
-      {/* ── Post-registration welcome popup — same glass family as the modal ── */}
+      {}
       <div
         onClick={() => setWelcomeOpen(false)}
         aria-hidden={!welcomeOpen}

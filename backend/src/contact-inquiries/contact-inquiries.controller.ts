@@ -16,14 +16,6 @@ import { ContactInquiriesService } from './contact-inquiries.service';
 import { CreateContactInquiryDto } from './dto/create-contact-inquiry.dto';
 import { UpdateContactInquiryDto } from './dto/update-contact-inquiry.dto';
 
-/**
- * The "צור קשר" page's message form, and the admin queue that reads it.
- *
- * The global 'api' prefix (main.ts) supplies the leading /api, so the routes
- * are /api/contact-inquiries and /api/contact-inquiries/:id — same shape as
- * booking-inquiries next door, and gated the same way: POST is public because
- * a contact form has to be, everything else is behind AdminGuard.
- */
 @ApiTags('contact-inquiries')
 @Controller('contact-inquiries')
 export class ContactInquiriesController {

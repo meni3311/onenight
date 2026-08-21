@@ -46,8 +46,11 @@ Source of truth is `frontend/src/styles.css` `:root` (CSS custom properties) —
 - NestJS modules follow the standard `*.module.ts` / `*.controller.ts` / `*.service.ts` split, one feature folder per domain (`dresses/`, `users/`, `auth-otp/`, `booking-inquiries/`, `contact-inquiries/`, `common/`), DTOs under a `dto/` subfolder.
 - `@Global()` modules (`PrismaModule`, `MailModule`) are injectable anywhere without a per-module import — don't re-import them.
 - Frontend: `pages/` (route-level), `components/<domain>/` (feature-scoped), `components/ui/` (generic), `hooks/`, `lib/` (api client, data helpers, normalization), `constants/`.
-- Comments explain **why**, not what — this repo leans heavily on doc-comments that record a past bug, a tradeoff, or a non-obvious constraint. Match that style: no restating the code, no stale historical narration once it's no longer relevant, no commented-out dead code.
 - No test suite and no linter/formatter config currently in the repo — don't introduce one unless asked.
+
+## Code Style
+
+- Do not add comments to code — no inline comments, no block comments, no JSDoc — unless the user explicitly asks for comments in that specific request. This applies to all code generation and edits, without exception, going forward.
 
 ## Known gotchas (verified current)
 

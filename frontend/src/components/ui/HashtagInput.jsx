@@ -2,16 +2,6 @@ import { useState } from "react";
 import { normalizeHashtag, MAX_HASHTAGS } from "../../lib/normalize.js";
 import { FONTS } from "../../constants/theme.js";
 
-/* Free-text hashtag entry: type, press Enter or comma, get a removable chip.
-
-   Tags are stored bare and the "#" is decoration added at render time, here and
-   everywhere else they appear. Typing one is fine — normalizeHashtag strips it.
-
-   The normalization here is the same as the server's and is purely for
-   feedback: the lister sees "summer-wedding" the instant they type
-   "#Summer Wedding", rather than discovering the rewrite after saving. The
-   server re-normalizes every write regardless (see dress-normalize.ts); this
-   component is not a validation layer and must not be treated as one. */
 export function HashtagInput({ value = [], onChange, variant = "form" }) {
   const [draft, setDraft] = useState("");
   const glass = variant === "glass";
@@ -24,23 +14,17 @@ export function HashtagInput({ value = [], onChange, variant = "form" }) {
     onChange([...value, tag]);
   };
 
-  /* Comma commits as well as Enter, so pasting "ערב, קיץ, זהב" lands as three
-     chips rather than one tag with commas hyphenated into it. */
   const onKeyDown = (e) => {
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
       commit(draft);
       return;
     }
-    // Backspace on an empty box removes the last chip — the usual affordance
-    // for this control, and quicker than aiming at a small ×.
     if (e.key === "Backspace" && !draft && value.length) {
       onChange(value.slice(0, -1));
     }
   };
 
-  /* A pasted list is split here rather than left for the change handler, so
-     one paste of "ערב, קיץ" doesn't sit in the box as a single pending tag. */
   const onPaste = (e) => {
     const text = e.clipboardData.getData("text");
     if (!text.includes(",")) return;
@@ -111,8 +95,6 @@ export function HashtagInput({ value = [], onChange, variant = "form" }) {
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
-        /* Commit whatever is pending on blur, so a tag typed and then
-           abandoned by clicking "publish" isn't silently dropped. */
         onBlur={() => commit(draft)}
         style={
           glass

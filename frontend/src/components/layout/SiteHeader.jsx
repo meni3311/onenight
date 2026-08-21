@@ -5,14 +5,8 @@ import { useBodyScrollLock } from "../../hooks/useBodyScrollLock.js";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { LOGO_URL } from "../../constants/theme.js";
 
-/* Very dark bordeaux for the navbar's User + hamburger icons — noticeably
-   deeper than the site's standard bordeaux (COLORS.bordeaux / --rose-deep,
-   #6B2D2D), which read as too light against the translucent header. */
 const BORDEAUX = "#401B1B";
 
-/* Glassmorphism dropdown anchored under the User icon — same frosted-dark
-   family as the auth modal, with a slightly denser fill and a softer,
-   subtly-rounded corner treatment of its own. */
 const MENU_ITEM_STYLE = {
   display: "block",
   width: "100%",
@@ -27,8 +21,6 @@ const MENU_ITEM_STYLE = {
   transition: "background-color 0.15s ease",
 };
 
-/* Signed-in dropdown: name header, nav links, then a visually distinct
-   logout row. Closes on outside click / Escape (wired by the parent). */
 function UserMenu({ name, onFavorites, onListings, onProfile, onLogout }) {
   const hover = (e) => { e.currentTarget.style.background = "rgba(255,255,255,0.07)"; };
   const unhover = (e) => { e.currentTarget.style.background = "transparent"; };
@@ -41,12 +33,6 @@ function UserMenu({ name, onFavorites, onListings, onProfile, onLogout }) {
       style={{
         position: "absolute",
         top: "calc(100% + 10px)",
-        /* Anchored to the icon's own left edge, not its right — the icon
-           sits near the LEFT edge of the screen (dir=ltr header layout),
-           so a right-anchored menu had nowhere to expand and clipped off
-           the viewport on narrow screens. Expanding rightward from the
-           icon (toward the center) keeps it fully on-screen at every
-           breakpoint without needing per-breakpoint overrides. */
         left: 0,
         zIndex: 60,
         minWidth: "220px",
@@ -103,9 +89,6 @@ function UserMenu({ name, onFavorites, onListings, onProfile, onLogout }) {
   );
 }
 
-/* Sticky 3-column navbar (User · logo · hamburger) with an RTL slide-in
-   side menu. lucide-react is unavailable in this environment, so the
-   project's inline Icon set / inline SVGs supply the matching glyphs. */
 export function SiteHeader({ go, goAccount }) {
   const scrolled = useScrolled(8);
   const [open, setOpen] = useState(false);
@@ -118,20 +101,16 @@ export function SiteHeader({ go, goAccount }) {
   const close = () => setOpen(false);
   const closeUserMenu = () => setUserMenuOpen(false);
 
-  /* Run a navigation action, then close the menu. */
   const navigate = (action) => {
     action();
     close();
   };
 
-  /* "פרסמי שמלה" gate lives in AuthContext (logged-in → /publish, else modal). */
   const handlePublish = () => {
     setOpen(false);
     requestPublish();
   };
 
-  /* User icon: signed out → open the shared auth modal; signed in → toggle
-     the dropdown. Closes on outside click / Escape while open. */
   const handleUserClick = () => {
     if (!isLoggedIn) {
       openAuth();
@@ -187,14 +166,12 @@ export function SiteHeader({ go, goAccount }) {
             : "1px solid rgba(139,58,58,0.12)",
         }}
       >
-        {/* dir=ltr pins the User icon visually LEFT and the hamburger RIGHT,
-            while the centered logo stays dead-center. */}
+        {}
         <div
           dir="ltr"
           className="relative mx-auto flex h-[72px] max-w-[1280px] items-center justify-between px-6 lg:px-10"
         >
-          {/* LEFT — user account: signed out opens the auth modal, signed
-              in opens this anchored dropdown */}
+          {}
           <div className="relative" ref={userMenuRef}>
             <button
               type="button"
@@ -219,9 +196,7 @@ export function SiteHeader({ go, goAccount }) {
             )}
           </div>
 
-          {/* CENTER — logo, absolutely centered. Replaces the old text
-              wordmark; the image is the brand mark now, so it carries the
-              alt text on its own rather than needing a caption. */}
+          {}
           <button
             type="button"
             onClick={() => navigate(() => { go("home"); window.scrollTo({ top: 0, behavior: "smooth" }); })}
@@ -231,18 +206,9 @@ export function SiteHeader({ go, goAccount }) {
             <img
               src={LOGO_URL}
               alt="onenight"
-              /* Above-the-fold and centered in the sticky header — treat it
-                 like the LCP element the same way Img.jsx's `priority` flag
-                 does for the first row of dress cards. */
               loading="eager"
               decoding="sync"
               fetchpriority="high"
-              /* Grows slightly on hover/focus — imperative onMouseEnter/Leave
-                 rather than a CSS :hover class, matching how hover states are
-                 done elsewhere in this file (e.g. UserMenu above), since this
-                 is a plain inline style object with no stylesheet rule of its
-                 own. transformOrigin keeps the growth centered instead of
-                 drifting toward one corner. */
               style={{ flexShrink: 0, width: 200, zIndex: 10, transform: "scale(1)", transformOrigin: "center", transition: "transform 0.25s ease" }}
               onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.08)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
@@ -251,7 +217,7 @@ export function SiteHeader({ go, goAccount }) {
             />
           </button>
 
-          {/* RIGHT — hamburger opens the side menu */}
+          {}
           <button
             type="button"
             onClick={() => setOpen(true)}
@@ -267,7 +233,7 @@ export function SiteHeader({ go, goAccount }) {
         </div>
       </header>
 
-      {/* Backdrop */}
+      {}
       <div
         onClick={close}
         aria-hidden="true"
@@ -284,7 +250,7 @@ export function SiteHeader({ go, goAccount }) {
         }}
       />
 
-      {/* Side menu — slides in from the RIGHT (RTL) */}
+      {}
       <aside
         dir="rtl"
         aria-hidden={!open}
@@ -305,7 +271,7 @@ export function SiteHeader({ go, goAccount }) {
           transition: open ? "transform 0.35s ease-out" : "transform 0.3s ease-in",
         }}
       >
-        {/* Header: close button (top-right) + centered logo + divider */}
+        {}
         <div className="relative pt-6">
           <button
             type="button"
@@ -332,7 +298,7 @@ export function SiteHeader({ go, goAccount }) {
           </div>
         </div>
 
-        {/* Navigation links */}
+        {}
         <nav className="flex flex-col items-center" style={{ paddingTop: "48px", gap: "32px" }}>
           {links.map((it) => (
             <button
@@ -347,7 +313,7 @@ export function SiteHeader({ go, goAccount }) {
           ))}
         </nav>
 
-        {/* Footer CTA pinned to the bottom */}
+        {}
         <div className="mt-auto flex justify-center pb-10">
           <button
             type="button"

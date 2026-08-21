@@ -1,12 +1,5 @@
 import { ProductGrid } from "../components/gallery/ProductGrid.jsx";
 
-/* The user's saved dresses, or an empty state prompting them to browse.
-
-   `dresses` is fetched by id from the server (App resolves favIds on entry),
-   not filtered out of the browse list — that list is one page now, so a
-   favourite from further down the catalogue would simply have vanished here.
-   It's filtered by the live favIds so un-hearting a card removes it
-   immediately without waiting on a refetch. */
 export default function FavoritesPage({ dresses, loading, favIds, onFav, onOpen, go }) {
   const shown = dresses.filter((d) => favIds.includes(d.id));
 

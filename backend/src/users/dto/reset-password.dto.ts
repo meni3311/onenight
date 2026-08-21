@@ -1,10 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, Matches, IsString, MinLength } from 'class-validator';
 
-/**
- * Body for POST /api/auth/reset-password. The OTP code is verified and the
- * password is changed in a single call — see UsersController for why.
- */
 export class ResetPasswordDto {
   @ApiProperty({ example: 'dana@example.com' })
   @IsEmail({}, { message: 'כתובת מייל לא תקינה' })

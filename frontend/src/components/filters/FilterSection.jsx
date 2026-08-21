@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Icon } from "../ui/Icon.jsx";
 import { ALPHA, FONTS } from "../../constants/theme.js";
 
-/* Collapsible accordion section inside the filter panel — open by default. */
 export function FilterSection({ title, icon, children, defaultOpen = true }) {
   const [open, setOpen] = useState(defaultOpen);
   return (

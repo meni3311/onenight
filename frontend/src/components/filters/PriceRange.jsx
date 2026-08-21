@@ -1,7 +1,5 @@
 import { COLORS } from "../../constants/theme.js";
 
-/* Glass range slider with a rose fill up to the current value. The fill
-   gradient is computed from the live percentage, so it stays inline. */
 export function PriceRange({ min, max, value, onChange }) {
   const pct = ((value - min) / (max - min)) * 100;
   return (

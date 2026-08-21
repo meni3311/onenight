@@ -1,10 +1,3 @@
-/* Static "תנאי שימוש ומדיניות פרטיות" page — linked from the registration
-   form's required-consent checkbox (and reachable directly at /#terms, the
-   same hash-route pattern the admin panel uses). Content lives here as
-   structured data rather than inline in the auth modal, per the brief:
-   a dedicated page component is the single source of truth for the legal
-   text, readably typeset with the site's existing heading/body conventions
-   (font-display for headings, default Assistant body, ink/muted palette). */
 
 const p = (content) => ({ type: "p", content });
 const ul = (items) => ({ type: "ul", items });

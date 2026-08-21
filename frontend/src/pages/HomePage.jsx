@@ -6,11 +6,6 @@ import { SortMenu } from "../components/filters/SortMenu.jsx";
 import { ProductGrid } from "../components/gallery/ProductGrid.jsx";
 import { PublishPromoPopup } from "../components/ui/PublishPromoPopup.jsx";
 
-/* Landing page: hero, brand sections, then the filterable dress gallery.
-
-   `dresses` is one server-filtered page, not the catalogue — `total` is how
-   many match the current filters overall, which is what the filter panel's
-   result count reports and what "load more" measures itself against. */
 export default function HomePage({
   go, filters, setFilters, sort, setSort, loading,
   dresses, total, hasMore, loadingMore, onLoadMore,
@@ -31,9 +26,7 @@ export default function HomePage({
 
       <section id="browse" className="mx-auto max-w-[1280px] px-3 pb-28 pt-14">
         <div className="flex gap-10">
-          {/* The count is the server's `total`, not how many cards are on
-              screen — the panel is telling the visitor how many dresses match
-              their filters, and only the first page of those is loaded. */}
+          {}
           <FilterSidebar f={filters} setF={setFilters} resultCount={total}>
             <SortMenu sort={sort} setSort={setSort} />
           </FilterSidebar>

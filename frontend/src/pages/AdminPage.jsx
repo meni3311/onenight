@@ -15,20 +15,8 @@ import { useSessionStorage } from "../hooks/useSessionStorage.js";
 const STATUS_LABELS = { approved: "מאושרת", pending: "ממתינה", rejected: "נדחתה" };
 const TABS = [["pending", "ממתינות"], ["approved", "מאושרות"], ["rejected", "נדחו"]];
 
-/* Tabs that are not a slice of the moderation queue. Each has its own
-   endpoint and its own loader, and neither wants the dress category filter
-   or the queue fetch. A set rather than a chain of comparisons, so adding
-   another one is a single edit here. */
 const NON_QUEUE_TABS = new Set(["inquiries", "contact"]);
 
-/* Approval and rejection emails are sent by the backend
-   (DressesService.updateStatus → MailService → Resend); the PATCH response
-   carries a `notification` object saying whether the send succeeded, which
-   is what the toasts below report. */
-
-/* Turn the PATCH /status response into an honest toast. `notification` is
-   absent when the decision doesn't notify anyone (e.g. re-saving a status
-   that was already set), in which case there is nothing to claim. */
 function decisionToast(base, res) {
   const n = res?.notification;
   if (!n) return base;
@@ -36,54 +24,24 @@ function decisionToast(base, res) {
   return `${base} — אך ${n.emailError || "שליחת המייל נכשלה"}`;
 }
 
-/* Booking-inquiry helpers — raw fetch rather than the shared `api()` helper,
-   same pattern as AuthContext/ProductPage's logBookingInquiry. Both reach the
-   same NestJS/Prisma backend now that the dress calls on this page are no
-   longer served by a localStorage mock. */
 const waLink = (phone) => `https://wa.me/972${(phone || "").replace(/^0/, "")}`;
 const fmtDateTime = (iso) => new Date(iso).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" });
 const fmtDate = (iso) => new Date(iso).toLocaleDateString("he-IL");
 
-/* Owner-only moderation panel: approve / reject submitted dresses. */
 export default function AdminPage({ toast, onOpen }) {
-  /* The admin "session" is the password itself — AdminGuard re-checks it on
-     every privileged call and no token is ever issued (see admin.guard.ts),
-     so there is nothing else to persist. Held in sessionStorage rather than
-     React state so a refresh doesn't drop it, and rather than localStorage
-     so it doesn't outlive the tab; see useSessionStorage for that tradeoff.
-
-     `authed` is intentionally NOT persisted alongside it. It's derived on
-     mount by re-validating the stored password (see below), so a password
-     that has since changed server-side can't leave the screen rendering a
-     queue whose every action will 401. */
   const [pw, setPw] = useSessionStorage("onenight_admin_pw", "");
   const [authed, setAuthed] = useState(false);
-  /* Blocks the login form for the one round trip that re-validation takes,
-     so a returning admin doesn't see the password prompt flash before the
-     panel appears. */
   const [rehydrating, setRehydrating] = useState(() => !!pw);
   const [tab, setTab] = useState("pending");
-  /* "" means every category. Server-side, like the status tabs — the queue is
-     paginated, so narrowing it in the browser would only filter the page in
-     hand and silently hide matches on later ones. */
   const [categoryFilter, setCategoryFilter] = useState("");
   const [rejecting, setRejecting] = useState(null);
   const [reason, setReason] = useState("");
-  // Dress id whose AI photo / manage-images panel is open.
   const [aiImagining, setAiImagining] = useState(null);
 
-  /* The moderation queue, fetched from the guarded endpoint with the stored
-     password — the password gates the data, not just the rendering.
-
-     `counts` comes back with every status regardless of which tab is open, so
-     the badges don't need the other tabs loaded. */
   const [dresses, setDresses] = useState([]);
   const [counts, setCounts] = useState({ pending: 0, approved: 0, rejected: 0 });
   const [queueLoading, setQueueLoading] = useState(false);
 
-  // Booking inquiries ("להזמנה" click log) — lazily loaded from the real
-  // backend the first (and every subsequent) time this tab is opened, so
-  // the list stays fresh across admin sessions without a manual refresh button.
   const [inquiries, setInquiries] = useState([]);
   const [inquiriesLoading, setInquiriesLoading] = useState(false);
 
@@ -105,10 +63,6 @@ export default function AdminPage({ toast, onOpen }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, authed]);
 
-  /* Contact-form messages ("צור קשר" → ContactPage.jsx). Same lazy-on-open,
-     refetch-every-time pattern as the booking inquiries above: the whole
-     point of this queue is that it's current, and there is no push channel
-     telling this screen a new message arrived. */
   const [contactInquiries, setContactInquiries] = useState([]);
   const [contactLoading, setContactLoading] = useState(false);
 
@@ -128,9 +82,6 @@ export default function AdminPage({ toast, onOpen }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, authed]);
 
-  /* Optimism would be wrong here: the row is replaced with what the server
-     returned, so a rejected update leaves the checkbox showing the truth
-     rather than the intent. */
   const toggleContactHandled = async (inq) => {
     try {
       const updated = await setContactInquiryHandled(inq.id, !inq.handled, pw);
@@ -150,19 +101,11 @@ export default function AdminPage({ toast, onOpen }) {
     }
   };
 
-  /* Reload the queue whenever the tab changes — each status is its own
-     request now rather than a filter over one big array. Approve/reject
-     update the loaded rows in place, so this doesn't refire on a moderation
-     decision and pull the row out from under the admin mid-click. */
   const loadQueue = async (status, category) => {
     setQueueLoading(true);
     try {
       const res = await getAdminDresses(status, pw, 1, category);
       setDresses(res?.items || []);
-      /* `counts` deliberately ignores the category filter server-side, so the
-         tab badges keep reporting the whole queue — otherwise filtering to
-         "כלה" would show "ממתינות (0)" while pending listings in other
-         categories sat unreviewed. */
       if (res?.counts) setCounts(res.counts);
     } catch (e) {
       toast("טעינת המודעות נכשלה: " + e.message);
@@ -177,13 +120,6 @@ export default function AdminPage({ toast, onOpen }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, authed, categoryFilter]);
 
-  /* Rehydrate the admin session on mount.
-     The stored password is re-checked against the server rather than
-     trusted, so it can't outlive a change to ADMIN_PASSWORD — that check is
-     this app's stand-in for token expiry, since the guard has no notion of
-     one. A rejected or errored password is cleared, dropping the admin back
-     to the login form instead of into a panel where every button 401s.
-     Runs once; the login form handles the interactive path. */
   useEffect(() => {
     if (!pw) { setRehydrating(false); return; }
     let cancelled = false;
@@ -194,8 +130,6 @@ export default function AdminPage({ toast, onOpen }) {
         if (r && r.ok) setAuthed(true);
         else setPw("");
       } catch {
-        // Network failure, not a wrong password — clear anyway rather than
-        // showing a panel we can't confirm is authorised.
         if (!cancelled) setPw("");
       } finally {
         if (!cancelled) setRehydrating(false);
@@ -227,8 +161,6 @@ export default function AdminPage({ toast, onOpen }) {
     }
   };
 
-  /* Held back until the stored password has been re-validated, so a refresh
-     goes straight to the panel instead of flashing the login form first. */
   if (rehydrating) return (
     <div className="container page pt-[50px]"><div className="empty">טוענת…</div></div>
   );
@@ -250,14 +182,8 @@ export default function AdminPage({ toast, onOpen }) {
     </div>
   );
 
-  /* No client-side filtering at all: the request was already scoped to this
-     tab's status and, when one is picked, to the category too. */
   const filtered = dresses;
 
-  /* A moderation decision moves the listing to a different tab, so it leaves
-     the loaded list and the badges are adjusted locally rather than by
-     refetching — the admin is usually working down a queue and a refetch
-     would reorder it underneath them. */
   const applyDecision = (id, from, to) => {
     setDresses((p) => p.filter((x) => x.id !== id));
     setCounts((c) => ({ ...c, [from]: Math.max(0, (c[from] || 0) - 1), [to]: (c[to] || 0) + 1 }));
@@ -267,8 +193,6 @@ export default function AdminPage({ toast, onOpen }) {
     try {
       const res = await api("/api/dresses/" + d.id + "/status", { method: "PATCH", adminPw: pw, body: { status: "approved" } });
       applyDecision(d.id, d.status, "approved");
-      /* The email is the backend's job now, and the toast reports what it
-         actually did rather than asserting it in advance. */
       toast(decisionToast("השמלה אושרה ✓", res));
     } catch (e) { toast("אישור נכשל: " + e.message); }
   };
@@ -285,11 +209,6 @@ export default function AdminPage({ toast, onOpen }) {
     setAiImagining((p) => (p === d.id ? null : d.id));
   };
 
-  /* An inquiry row keeps its own snapshot of the listing (title, both phone
-     numbers) precisely so it outlives the dress — see the note on
-     deleteDress. Only "view the dress" needs the live record, so it is
-     fetched on click — a missing dress is then an actual 404 rather than a
-     guess from whatever happens to be in memory. */
   const openInquiryDress = async (dressId) => {
     try {
       const dress = await getDress(dressId);
@@ -301,8 +220,7 @@ export default function AdminPage({ toast, onOpen }) {
 
   return (
     <div className="container page pt-[30px]">
-      {/* Explicit logout matters now that the session survives a refresh —
-          without it the only way out is closing the tab. */}
+      {}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="section-title">פאנל ניהול</h2>
         <button className="btn btn-ghost" onClick={adminLogout}>יציאה</button>
@@ -316,10 +234,7 @@ export default function AdminPage({ toast, onOpen }) {
         <button className={"tab" + (tab === "inquiries" ? " on" : "")} onClick={() => setTab("inquiries")}>
           בקשות הזמנה
         </button>
-        {/* Contact-form messages. The badge counts what's still open rather
-            than the whole list — a queue that only ever grows stops being a
-            number anyone reads. It's blank until the tab has been opened
-            once, because the list isn't fetched before then. */}
+        {}
         <button className={"tab" + (tab === "contact" ? " on" : "")} onClick={() => setTab("contact")}>
           פניות
           {contactInquiries.length > 0
@@ -328,8 +243,7 @@ export default function AdminPage({ toast, onOpen }) {
         </button>
       </div>
 
-      {/* Category filter for the moderation queue. Hidden on the tabs that
-          list something other than dresses. */}
+      {}
       {!NON_QUEUE_TABS.has(tab) && (
         <div className="chips mb-3">
           <button
@@ -396,10 +310,6 @@ export default function AdminPage({ toast, onOpen }) {
             <div
               key={c.id}
               className="admin-row"
-              /* Handled messages recede rather than disappear: the admin
-                 still wants to find "that message from last week", and a
-                 filter would hide it behind a control nobody would think to
-                 look for. */
               style={c.handled ? { opacity: 0.55 } : undefined}
             >
               <div className="flex-1">
@@ -409,12 +319,10 @@ export default function AdminPage({ toast, onOpen }) {
                   <span className="card-meta">נשלח: {fmtDateTime(c.createdAt)}</span>
                 </div>
                 <div className="card-meta">
-                  {/* dir=ltr so the address isn't visually reordered inside
-                      the RTL row. */}
+                  {}
                   <span dir="ltr">{c.email}</span>
                 </div>
-                {/* whitespace-pre-line: the visitor typed this into a
-                    textarea and their line breaks are part of the message. */}
+                {}
                 <p className="my-1.5 whitespace-pre-line text-[13px] text-[var(--text)]">{c.message}</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <a

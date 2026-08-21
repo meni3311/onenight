@@ -5,35 +5,13 @@ import { useLocalStorage } from "../../hooks/useLocalStorage.js";
 import { Icon } from "./Icon.jsx";
 
 const SHOW_DELAY_MS = 2500;
-const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // once every 7 days
+const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
-/* Homepage-only nudge encouraging visitors to list a dress. Styled to match
-   the site's other popups exactly — same dark-glass family as ConfirmModal
-   and AuthContext's auth/welcome modals (rgba(42,31,31,0.85) background,
-   24px blur, rose-tinted 1px border, 20px rounded corners, white/rose text,
-   rounded-full bordeaux CTA). What's reused: that visual family plus the
-   fixed-overlay-plus-centered-dialog structure and backdrop-click-to-dismiss
-   those modals already established. Escape-key handling is new — no
-   existing modal in the app wires that up (checked: only SiteHeader's
-   user-menu dropdown does, and that's local to itself), so it's added here
-   directly rather than invented as a shared hook for a single caller.
-
-   Mounted only from HomePage.jsx (route === "home"), so it structurally
-   can't appear on the publish page or anywhere else — no extra
-   route-matching logic needed here. */
 export function PublishPromoPopup() {
   const { isLoggedIn, account, requestPublish } = useAuth();
   const [dismissedAt, setDismissedAt] = useLocalStorage("onenight_publish_promo_dismissed_at", 0);
   const [visible, setVisible] = useState(false);
 
-  /* "Does this account already have a listing" is asked of the owner
-     endpoint, not derived from the browse list — that list is one page of
-     approved listings, so it would miss anyone whose only listing is still
-     pending (exactly the person who least needs nagging into publishing) or
-     sits on a later page.
-
-     Starts null (unknown) rather than false so the popup can't fire during
-     the round trip; the timer below waits for a definite answer. */
   const [hasListing, setHasListing] = useState(null);
 
   useEffect(() => {
@@ -41,8 +19,6 @@ export function PublishPromoPopup() {
     let cancelled = false;
     getMyDresses(account.email)
       .then((rows) => { if (!cancelled) setHasListing((rows || []).length > 0); })
-      // A failed lookup shouldn't produce a popup for someone who has already
-      // listed — stay quiet rather than guess.
       .catch(() => { if (!cancelled) setHasListing(true); });
     return () => { cancelled = true; };
   }, [isLoggedIn, account?.email]);
@@ -56,8 +32,6 @@ export function PublishPromoPopup() {
     if (!eligible) return;
     const t = setTimeout(() => setVisible(true), SHOW_DELAY_MS);
     return () => clearTimeout(t);
-    // Intentionally keyed only on `eligible` — a running timer shouldn't
-    // restart just because `dresses` re-fetches mid-wait.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eligible]);
 
@@ -137,8 +111,7 @@ export function PublishPromoPopup() {
           <Icon.close width="18" height="18" className="block" />
         </button>
 
-        {/* Same flower glyph AuthContext's welcome popup opens on — kept to
-            a single emoji there, so matched here rather than piling more on. */}
+        {}
         <div style={{ fontSize: "2rem" }}>🌸</div>
 
         <h3 className="font-body" style={{ marginTop: "6px", fontSize: "1.2rem", fontWeight: 700, color: "#fff" }}>

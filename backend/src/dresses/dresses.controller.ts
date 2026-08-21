@@ -26,9 +26,6 @@ import { ToggleBookedDateDto, UpdateDressStatusDto } from './dto/dress-admin.dto
 import { DeleteDressDto } from './dto/delete-dress.dto';
 
 @ApiTags('dresses')
-// The global 'api' prefix (see main.ts's app.setGlobalPrefix) supplies the
-// leading /api — this controller only owns its own sub-path, so the full
-// route is still /api/dresses/...
 @Controller('dresses')
 export class DressesController {
   constructor(
@@ -36,49 +33,24 @@ export class DressesController {
     private readonly storage: StorageService,
   ) {}
 
-  /**
-   * The public browse list. Approved listings only, one page at a time,
-   * filtered and sorted server-side, without owner contact details.
-   *
-   * No parameter reaches a non-approved listing from here; the moderation
-   * queue lives behind AdminGuard on AdminDressesController. `status` is
-   * accepted and ignored so a stale client can't 400 — see
-   * BrowseDressesDto.
-   */
   @Get()
   @ApiOperation({ summary: 'Browse approved dresses — paginated, filtered, sorted' })
   listDresses(@Query() query: BrowseDressesDto): Promise<Page<PublicDress>> {
     return this.service.listPublic(query);
   }
 
-  /**
-   * Resolve favourited ids to listings. Declared before `:id` for the same
-   * reason "images" is — Nest matches in declaration order, and otherwise
-   * "by-ids" would be read as a dress id.
-   */
   @Get('by-ids')
   @ApiOperation({ summary: 'Approved dresses by id, in the order requested' })
   listByIds(@Query() query: DressIdsDto): Promise<PublicDress[]> {
     return this.service.listPublicByIds(query.ids ?? []);
   }
 
-  /**
-   * An owner's own listings, pending and rejected included, for the account
-   * screen. Ownership is an email match — the same weak rule the delete
-   * endpoint below uses, and the strongest one available until this app has
-   * real sessions. See DressesService.listByOwner.
-   */
   @Get('mine')
   @ApiOperation({ summary: "An owner's own listings, by email" })
   listMine(@Query('email') email: string): Promise<ClientDress[]> {
     return this.service.listByOwner(email);
   }
 
-  /**
-   * Upload one listing photo and get back its public URL. Declared before
-   * `:id` routes — Nest matches in declaration order, so without this
-   * "images" would be captured as a dress id.
-   */
   @Post('images')
   @ApiOperation({ summary: 'Upload a listing photo to Cloudflare R2' })
   @ApiConsumes('multipart/form-data')
@@ -131,23 +103,12 @@ export class DressesController {
     return this.service.updateStatus(id, dto);
   }
 
-  /**
-   * How many booking inquiries point at this listing. Read by the owner's
-   * delete confirmation so it can say so before anything is destroyed.
-   * Returns only a count — no renter details — so it needs no gate beyond
-   * knowing the dress id.
-   */
   @Get(':id/inquiry-count')
   @ApiOperation({ summary: 'Number of booking inquiries referencing this dress' })
   async getInquiryCount(@Param('id') id: string): Promise<{ count: number }> {
     return { count: await this.service.countInquiries(id) };
   }
 
-  /**
-   * Owner deletes their own listing. Not admin-gated — this is the
-   * user-facing action, separate from any moderation tooling. Ownership is
-   * checked in the service against the listing's email.
-   */
   @Delete(':id')
   @HttpCode(204)
   @ApiOperation({ summary: "Owner: delete their own listing and its photos" })

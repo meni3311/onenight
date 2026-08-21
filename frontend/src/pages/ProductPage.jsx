@@ -5,28 +5,6 @@ import { useBodyScrollLock } from "../hooks/useBodyScrollLock.js";
 import { getDress, getSimilarDresses, withBase } from "../lib/api.js";
 import { CATEGORY_LABELS } from "../lib/data.js";
 
-/* ============================================================================
-   ProductPage — full dedicated dress page (mobile-first, RTL).
-   Rent-the-Runway × SSENSE feel:
-   full-bleed gallery, editorial identity block, size + date selection,
-   accordion details, reviews rail, similar dresses, sticky booking CTA.
-
-   Props:
-     d              — the card that was clicked. A browse-list dress, which is
-                      deliberately incomplete: the public list carries no
-                      `phone`, so this page fetches the full record itself and
-                      renders from the card meanwhile (see `detail` below).
-     fav            — is this dress favorited
-     onFav(id)      — toggle favorite
-     onClose()      — back to the dress grid
-     toast(msg)     — transient toast
-     onOpenSimilar  — (optional) open another dress
-
-   The "you may also like" rail comes from /api/dresses/:id/similar, fetched
-   here rather than passed in.
-============================================================================ */
-
-/* ---- design tokens straight from the brief ---- */
 const C = {
   cream: "#FDF8F5",
   fuchsia: "#E8457A",
@@ -38,12 +16,6 @@ const C = {
   white: "#FFFFFF",
   green: "#4CAF50",
   disabled: "#CCCCCC",
-  /* Site palette, used by the gallery chrome only. A white glyph vanishes
-     against a pale dress photo, and most of this catalogue is pale. Bordeaux
-     is the brand's own ink
-     (COLORS.bordeaux in constants/theme.js, the navbar's icon colour) and
-     reads against both light and dark photography through the frosted glass
-     behind it. The rest of this page's fuchsia system is untouched. */
   bordeaux: "#6B2D2D",
   bordeauxDeep: "#5A2424",
 };
@@ -54,7 +26,6 @@ const HE_MONTHS = ["ינואר","פברואר","מרץ","אפריל","מאי","�
 const HE_DOW = ["א","ב","ג","ד","ה","ו","ש"];
 const STD_SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
 
-/* date helpers — keys are "YYYY-MM-DD" to match the stored `booked` array */
 const keyOf = (y, m, d) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 const parseKey = (k) => { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d); };
 const daysBetween = (a, b) => Math.round((parseKey(b) - parseKey(a)) / 86400000);
@@ -73,7 +44,7 @@ function rangeSummary(start, end) {
   if (!start) return "";
   if (!end) return fmtDay(start);
   const s = parseKey(start), e = parseKey(end);
-  const nights = daysBetween(start, end) + 1; // inclusive, per the brief's "15–17 | 3 לילות"
+  const nights = daysBetween(start, end) + 1;
   const label =
     s.getMonth() === e.getMonth()
       ? `${s.getDate()}–${e.getDate()} ב${HE_MONTHS[s.getMonth()]}`
@@ -81,7 +52,6 @@ function rangeSummary(start, end) {
   return `${label} | ${nights} לילות`;
 }
 
-/* ---------------------------------------------------------------- Gallery */
 function Gallery({ images, color, label, fav, onFav, onBack }) {
   const [idx, setIdx] = useState(0);
   const touchX = useRef(null);
@@ -93,7 +63,6 @@ function Gallery({ images, color, label, fav, onFav, onBack }) {
     if (touchX.current == null) return;
     const dx = e.changedTouches[0].clientX - touchX.current;
     if (Math.abs(dx) > 40) {
-      // RTL: swipe-left → next image, swipe-right → previous
       go(dx < 0 ? idx + 1 : idx - 1);
     }
     touchX.current = null;
@@ -109,31 +78,20 @@ function Gallery({ images, color, label, fav, onFav, onBack }) {
       />
 
       <button type="button" className="op-glass op-glass-back" aria-label="חזרה לגלריית השמלות" onClick={onBack}>
-        {/* RTL back = arrow pointing right */}
+        {}
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <path d="M9 6l6 6-6 6" />
         </svg>
       </button>
 
       <button type="button" className="op-glass op-glass-fav" aria-label={fav ? "הסרה ממועדפים" : "הוספה למועדפים"} aria-pressed={fav} onClick={onFav}>
-        {/* `currentColor` for both fill and stroke so the one bordeaux tone on
-            .op-glass drives the whole glyph — favourited fills it in, not
-            recolours it. Hover/active shading then applies to both halves
-            automatically instead of needing a second hardcoded hex here. */}
+        {}
         <svg width="20" height="20" viewBox="0 0 24 24" fill={fav ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
           <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
         </svg>
       </button>
 
-      {/* Prev / next, one on each side of the photo. The gallery has always
-          been swipeable (see onTouchStart above) but that gesture doesn't
-          exist on a desktop pointer, so the dots were the only way through
-          the images there — and a 7px dot is a poor click target. Rendered
-          only when there is more than one photo; with a single image there is
-          nothing to step through and an arrow would be a dead control.
-
-          `go()` already wraps modulo n, so the last image steps to the first
-          and there are no disabled end states to style. */}
+      {}
       {n > 1 && (
         <>
           <button
@@ -142,8 +100,7 @@ function Gallery({ images, color, label, fav, onFav, onBack }) {
             aria-label="התמונה הקודמת"
             onClick={() => go(idx - 1)}
           >
-            {/* RTL gallery: "previous" moves toward the start of the strip,
-                which sits on the right — so the previous arrow points right. */}
+            {}
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 6l6 6-6 6" />
             </svg>
@@ -173,7 +130,6 @@ function Gallery({ images, color, label, fav, onFav, onBack }) {
   );
 }
 
-/* --------------------------------------------------------------- Calendar */
 function Calendar({ booked, range, onPick }) {
   const today = useMemo(() => { const t = new Date(); t.setHours(0, 0, 0, 0); return t; }, []);
   const [view, setView] = useState({ y: today.getFullYear(), m: today.getMonth() });
@@ -194,7 +150,7 @@ function Calendar({ booked, range, onPick }) {
   return (
     <div className="op-cal">
       <div className="op-cal-head">
-        {/* RTL nav: right arrow = previous month, left arrow = next */}
+        {}
         <button type="button" className="op-cal-nav" aria-label="חודש קודם" onClick={() => shift(-1)}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
         </button>
@@ -229,7 +185,6 @@ function Calendar({ booked, range, onPick }) {
   );
 }
 
-/* -------------------------------------------------------------- Accordion */
 function AccordionRow({ title, children, open, onToggle }) {
   const bodyRef = useRef(null);
   return (
@@ -245,14 +200,8 @@ function AccordionRow({ title, children, open, onToggle }) {
   );
 }
 
-/* ============================================================== ProductPage */
 export default function ProductPage({ d: summary, fav, onFav, onClose, toast, onOpenSimilar }) {
   const { isLoggedIn, account, openAuth } = useAuth();
-  /* The full record and the rail, both fetched on open. `detail` starts null
-     and the page renders from the clicked card until it lands, so opening a
-     dress still paints immediately — the only thing missing in that window is
-     the owner's phone, which is needed at the very end of the flow (pick a
-     size, pick dates, then book) rather than on arrival. */
   const [detail, setDetail] = useState(null);
   const [similar, setSimilar] = useState([]);
   const [size, setSize] = useState(null);
@@ -261,24 +210,10 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
   const [sizeGuide, setSizeGuide] = useState(false);
   const [authPrompt, setAuthPrompt] = useState(false);
 
-  /* App.jsx renders ProductPage *alongside* the home grid (App.jsx keeps
-     `route === "home"` mounted underneath `{selected && <ProductPage/>}`)
-     rather than swapping it out — .op-root's position:fixed only covers
-     that content visually. Without this, body stays tall/scrollable behind
-     the overlay, and the browser draws its native scrollbar for that
-     hidden body scroll at the viewport edge (fixed positioning can't hide
-     browser-chrome scrollbars), which read as a stray grey scrollbar on
-     the left. useBodyScrollLock is the same hook the auth modal and mobile
-     nav already use. */
   useBodyScrollLock(true);
 
   useEffect(() => { window.scrollTo?.({ top: 0 }); }, [summary?.id]);
 
-  /* Keyed on the id, so opening another dress from the rail refetches rather
-     than showing the previous one's contact details or suggestions. Both
-     failures are quiet: a missing rail is invisible, and a missing detail
-     leaves the card's own data on screen — book() below is what refuses to
-     proceed without a phone number. */
   useEffect(() => {
     const id = summary?.id;
     if (!id) return;
@@ -294,9 +229,6 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
     return () => { cancelled = true; };
   }, [summary?.id]);
 
-  /* One object for the render: the fetched record once it's here, the clicked
-     card until then. Same field names either way — the public list is the
-     full shape minus the contact details. */
   const d = detail || summary;
 
   if (!d) return null;
@@ -305,10 +237,6 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
   const booked = d.booked || [];
   const sellerLabel = d.source === "שם חנות" ? (d.store || "בוטיק") : (d.source || "תפירה אישית");
 
-  /* A listing carries every size it fits now, not one. The picker offers the
-     standard run plus any non-standard size this dress was actually listed
-     under ("מידה אחת", "38 ארוך" — see the Other field in SizeMultiSelect),
-     and everything the dress fits is selectable rather than just one chip. */
   const dressSizes = d.sizes || [];
   const sizeList = [...STD_SIZES, ...dressSizes.filter((s) => !STD_SIZES.includes(s))];
   const isSizeAvailable = (s) => dressSizes.includes(s);
@@ -321,10 +249,6 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
     });
   };
 
-  /* availability indicator — dynamic on the selected range.
-     A single clicked day (no end date chosen yet) is a valid same-day
-     rental on its own; a second click on a later day extends it into a
-     multi-day range. Either way `end` defaults to `start`. */
   const hasDates = Boolean(range.start);
   const effectiveEnd = range.end || range.start;
   const conflict = hasDates && rangeKeys(range.start, effectiveEnd).some((k) => booked.includes(k));
@@ -336,17 +260,8 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
 
   const canBook = !!size && hasDates && !conflict;
 
-  /* Fire-and-forget: logs this click for the admin's booking-inquiries
-     page (see backend/src/booking-inquiries). Deliberately doesn't await
-     or block on this — a failed/slow log must never delay or break the
-     WhatsApp flow below, which is the actual user-facing behavior and is
-     untouched. Goes straight to the real backend via fetch() rather than
-     the api() helper (same as AuthContext's calls), but still routed
-     through withBase() so it reaches the right origin once frontend and
-     backend are deployed separately (Vercel/Render) instead of assuming
-     same-origin. */
   const logBookingInquiry = () => {
-    if (!account?.id) return; // isLoggedIn is already required to reach this point; belt-and-suspenders
+    if (!account?.id) return;
     fetch(withBase("/api/booking-inquiries"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -359,7 +274,7 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
         selectedStartDate: range.start,
         selectedEndDate: effectiveEnd,
       }),
-    }).catch(() => { /* logging failure shouldn't surface to the renter */ });
+    }).catch(() => {  });
   };
 
   const book = () => {
@@ -368,10 +283,6 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
       setAuthPrompt(true);
       return;
     }
-    /* The owner's number isn't on the browse card — it comes with the detail
-       fetch above. Reaching here without it means that request hasn't landed
-       (or failed), and continuing would open WhatsApp on a malformed number
-       and log an inquiry the admin can't act on. */
     if (!d.phone) {
       toast && toast("רגע, טוענים את פרטי המודעה…");
       return;
@@ -390,12 +301,12 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
       <style>{CSS}</style>
 
       <div className="op-scroll">
-        {/* SECTION 1 — full-bleed gallery */}
+        {}
         <div className="op-anim" style={{ animationDelay: "0ms" }}>
           <Gallery images={images} color={d.colorHex} label={d.title} fav={fav} onFav={() => onFav(d.id)} onBack={onClose} />
         </div>
 
-        {/* SECTION 2 — identity */}
+        {}
         <section className="op-sec op-anim" style={{ animationDelay: "80ms" }}>
           {CATEGORY_LABELS[d.category] && (
             <span className="op-category">{CATEGORY_LABELS[d.category]}</span>
@@ -409,7 +320,7 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
           </div>
         </section>
 
-        {/* SECTION 3 — size */}
+        {}
         <section className="op-sec op-anim" style={{ animationDelay: "160ms" }}>
           <p className="op-label">בחרי מידה</p>
           <div className="op-sizes">
@@ -425,11 +336,7 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
               );
             })}
           </div>
-          {/* Set size sits with the sizes rather than in the details
-              accordion: for a bridesmaid listing "how many dresses" is part of
-              reading the size row, not a detail to expand for. The per-dress
-              breakdown is in the description, which the publish form asks the
-              lister for explicitly. */}
+          {}
           {d.category === "bridesmaid" && d.bridesmaidSetCount > 0 && (
             <p className="op-setcount">סט של {d.bridesmaidSetCount} שמלות · פירוט המידות בתיאור השמלה</p>
           )}
@@ -444,21 +351,21 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
           )}
         </section>
 
-        {/* SECTION 4 — dates */}
+        {}
         <section className="op-sec op-anim" style={{ animationDelay: "240ms" }}>
           <p className="op-label">בחרי תאריכי השכרה</p>
           <Calendar booked={booked} range={range} onPick={pickDate} />
           {range.start && <p className="op-range-summary">{rangeSummary(range.start, range.end)}</p>}
         </section>
 
-        {/* SECTION 5 — details accordion */}
+        {}
         <section className="op-sec op-anim" style={{ animationDelay: "320ms" }}>
           <AccordionRow title="פרטי השמלה" open={openAcc === 0} onToggle={() => setOpenAcc(openAcc === 0 ? -1 : 0)}>
             {d.desc && <p>{d.desc}</p>}
             <p>קטגוריה: {CATEGORY_LABELS[d.category] || "—"}</p>
             <p>מידות: {dressSizes.join(", ") || "—"}</p>
             <p>צבע: {d.color || "—"}</p>
-            {/* Distinct from קטגוריה above: provenance, not occasion. */}
+            {}
             <p>מקור: {sellerLabel}</p>
             <p>מצב: {d.condition || "—"}</p>
             <p>אזור: {d.region || "—"}</p>
@@ -477,27 +384,9 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
           </AccordionRow>
         </section>
 
-        {/* SECTION 6 — reviews — REMOVED (deferred feature, see below near
-            the REVIEWS const for details). Re-enable by uncommenting this
-            block; nothing else references it.
-        <section className="op-sec op-sec--reviews op-anim" style={{ animationDelay: "400ms" }}>
-          <h2 className="op-h2">מה אמרו עליה</h2>
-          <div className="op-reviews">
-            {REVIEWS.map((r, i) => (
-              <article key={i} className="op-review">
-                <div className="op-review-top">
-                  <span className="op-review-name">{r.name}</span>
-                  <span className="op-stars">{"★".repeat(r.stars)}</span>
-                </div>
-                <p className="op-review-text">{r.text}</p>
-                <span className="op-review-size">מידה {r.size}</span>
-              </article>
-            ))}
-          </div>
-        </section>
-        */}
+        {}
 
-        {/* SECTION 7 — similar */}
+        {}
         {similar.length > 0 && (
           <section className="op-sec op-anim" style={{ animationDelay: "480ms" }}>
             <h2 className="op-h2">אולי תאהבי גם</h2>
@@ -516,7 +405,7 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
         <div className="op-cta-spacer" />
       </div>
 
-      {/* STICKY BOTTOM CTA */}
+      {}
       <div className="op-cta">
         <span className="op-cta-price">₪{d.price} <span>/ לערב</span></span>
         <button type="button" className={"op-cta-btn" + (canBook ? "" : " op-cta-btn--off")} disabled={!canBook} onClick={book}>
@@ -524,7 +413,7 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
         </button>
       </div>
 
-      {/* size guide modal */}
+      {}
       {sizeGuide && (
         <div className="op-modal-overlay" onClick={() => setSizeGuide(false)}>
           <div className="op-modal" dir="rtl" onClick={(e) => e.stopPropagation()}>
@@ -548,11 +437,7 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
         </div>
       )}
 
-      {/* auth gate — shown instead of the WhatsApp flow for signed-out users.
-          Styled to match AuthContext's own modal exactly (same dark-glass
-          card, bordeaux/rose/cream palette, Assistant body copy) rather
-          than this page's own fuchsia/white modal system, since this is
-          effectively a preview step for that same modal. */}
+      {}
       {authPrompt && (
         <div
           onClick={() => setAuthPrompt(false)}
@@ -610,7 +495,7 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
               </svg>
             </button>
 
-            {/* same lock glyph the auth modal opens on */}
+            {}
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#C4A0A0" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block", margin: "0 auto 20px" }}>
               <rect x="5" y="11" width="14" height="10" rx="2" />
               <path d="M8 11V7a4 4 0 0 1 8 0v4" />
@@ -654,20 +539,6 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
   );
 }
 
-/* Reviews UI removed (deferred feature — see SECTION 6 above, commented out).
-   This sample data was always presentational only: the real Review model
-   (backend/prisma/schema.prisma) exists but has no NestJS controller/service
-   wired to it yet, and nothing in this app ever fetched real reviews — so
-   there's no live data to preserve here, just this hardcoded array. Left
-   commented rather than deleted so re-enabling SECTION 6 is a pure uncomment.
-const REVIEWS = [
-  { name: "נועה ל.", stars: 5, size: "M", text: "השמלה הייתה מושלמת, בדיוק כמו בתמונות. קיבלתי המון מחמאות בערב." },
-  { name: "שיר כ.", stars: 5, size: "S", text: "איכות מדהימה והתהליך היה פשוט וזורם. אשכיר שוב בשמחה." },
-  { name: "דנה מ.", stars: 4, size: "L", text: "שמלה יפהפייה ונוחה. הגיעה נקייה ומגוהצת, מומלץ בחום." },
-];
-*/
-
-/* ------------------------------------------------------------------- CSS */
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Jost:wght@300;400;500;600&display=swap');
 

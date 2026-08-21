@@ -1,19 +1,6 @@
 import { useRef, useState } from "react";
 import { uploadDressImage } from "../../lib/api.js";
 
-/* Shared image dropzone: click-or-drag upload, thumbnail previews with
-   remove + reorder. Used by both the publish form (new listings) and the
-   admin review screen (editing images on a pending request), so both talk
-   to the same `images: string[]` shape.
-
-   Those strings are public Cloudflare R2 URLs, never base64 data URLs:
-   files go straight to storage via the backend and only the returned URL is
-   held in state, so whatever is submitted is already durable and shareable
-   rather than living in the browser that uploaded it.
-
-   Uploads happen on selection rather than on form submit: it keeps the
-   submit path a plain JSON POST, and the user sees failures while they're
-   still looking at the picker instead of after filling the whole form. */
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
 const MAX_BYTES = 10 * 1024 * 1024;
 
@@ -25,9 +12,6 @@ export function ImageUploader({ images, setImages, max = 3, error, dressId }) {
 
   const handleFiles = async (list) => {
     setUploadError("");
-    // `images.length` is read once here, but each upload resolves
-    // independently — the functional setState below re-checks `max` so a
-    // burst of parallel uploads can't overshoot the cap.
     const room = max - images.length;
     if (room <= 0) return;
 

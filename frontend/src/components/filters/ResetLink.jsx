@@ -1,6 +1,5 @@
 import { FONTS } from "../../constants/theme.js";
 
-/* "איפוס הכל" — clears all active filters. */
 export function ResetLink({ onClick }) {
   return (
     <button

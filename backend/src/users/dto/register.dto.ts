@@ -8,7 +8,6 @@ import {
   MinLength,
 } from 'class-validator';
 
-/** Body for POST /api/auth/register. */
 export class RegisterDto {
   @ApiProperty({ example: 'דנה כהן' })
   @IsString()

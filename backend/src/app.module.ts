@@ -13,13 +13,8 @@ import { HealthController } from './common/health.controller';
 
 @Module({
   imports: [
-    // Prisma (PostgreSQL on Neon) — the sole datastore, users and auth
-    // included.
     PrismaModule,
-    // Outbound email (Resend). @Global, like PrismaModule — MailService is
-    // injectable anywhere without a per-module import. See mail.module.ts.
     MailModule,
-    // Serve the frontend (../frontend) at http://localhost:3000
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', '..', 'frontend'),
       serveStaticOptions: { index: ['index.html'] },
@@ -30,8 +25,6 @@ import { HealthController } from './common/health.controller';
     BookingInquiriesModule,
     ContactInquiriesModule,
   ],
-  // Standalone controllers with no service/module of their own: the admin
-  // password check and the health probe.
   controllers: [AdminController, HealthController],
 })
 export class AppModule {}

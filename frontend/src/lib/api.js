@@ -1,27 +1,6 @@
-/* ============================================================
-   HTTP client for the NestJS backend.
 
-   Every dress read and write goes to Postgres (via Prisma) and every
-   photo lives in Cloudflare R2. Nothing in the dress flow touches browser
-   storage — a browser-local copy is what makes a listing invisible from
-   every other browser.
-
-   Do not reintroduce a local fallback here. A mock that silently takes
-   over when the API is down looks like it works and loses data.
-   ============================================================ */
-
-/* Dev goes through Vite's proxy (see vite.config.js), which forwards
-   /api → http://localhost:3000. In production (frontend on Vercel, backend
-   on Render — different origins) set VITE_API_BASE_URL to the deployed API
-   origin, e.g. https://onenight-api.onrender.com — see .env.example. */
 const BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
-/* Callers pass the full "/api/..." path, matching the backend's global
-   prefix (see backend/src/main.ts). Exported so every other place in the
-   app that talks to the backend with a raw fetch() — AuthContext's OTP
-   calls, AdminPage's booking-inquiries calls, ProductPage's inquiry log —
-   goes through this same BASE instead of assuming same-origin, which only
-   holds locally behind the Vite proxy. */
 export const withBase = (path) => BASE + path;
 
 export class ApiError extends Error {
@@ -32,9 +11,6 @@ export class ApiError extends Error {
   }
 }
 
-/* Nest's exception filter returns { message, error, statusCode }, where
-   `message` is a string for most throws but an array of strings for
-   ValidationPipe failures. Flatten both into one readable line. */
 async function readError(res) {
   let payload;
   try {
@@ -47,13 +23,6 @@ async function readError(res) {
   return new ApiError(text || `שגיאת שרת (${res.status})`, res.status);
 }
 
-/**
- * @param {string} path    e.g. "/api/dresses?page=2&sort=price_asc"
- * @param {object} [opts]
- * @param {string} [opts.method]
- * @param {object} [opts.body]     JSON-serialized
- * @param {string} [opts.adminPw]  sent as the x-admin-password header
- */
 export async function api(path, { method = "GET", body, adminPw } = {}) {
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -67,7 +36,6 @@ export async function api(path, { method = "GET", body, adminPw } = {}) {
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
-    // Network-level failure (server down, DNS, CORS preflight refused).
     throw new ApiError("לא ניתן להתחבר לשרת. נסי שוב בעוד רגע.", 0);
   }
 
@@ -76,91 +44,38 @@ export async function api(path, { method = "GET", body, adminPw } = {}) {
   return res.json();
 }
 
-/**
- * One page of the public browse list.
- *
- * `query` is a ready-made query string from filtersToQuery — the filter state
- * knows its own defaults and which of them are worth sending, and this layer
- * shouldn't need to.
- *
- * Resolves with `{ items, total, page, limit }`. `items` carries no `phone`,
- * `email` or `photos`: the browse response is public, so contact details come
- * only from getDress() when a listing is actually opened.
- *
- * There is no way to ask this for pending or rejected listings — the
- * moderation queue is getAdminDresses(), which is password-gated.
- */
 export function browseDresses(query = "") {
   return api(`/api/dresses${query}`);
 }
 
-/**
- * One listing in full, contact details included. The card in the grid
- * carries no `phone`, so the detail view fetches this on open — the
- * WhatsApp CTA and the booking-inquiry log both need it.
- */
 export function getDress(dressId) {
   return api(`/api/dresses/${encodeURIComponent(dressId)}`);
 }
 
-/**
- * Approved listings by id, in the order asked for. Backs the favourites page,
- * which holds ids in localStorage. Ids that are unknown — or not approved —
- * are absent from the response rather than an error.
- */
 export function getDressesByIds(ids) {
   if (!ids.length) return Promise.resolve([]);
   return api(`/api/dresses/by-ids?ids=${encodeURIComponent(ids.join(","))}`);
 }
 
-/** The "you may also like" rail. Approved only, excludes the listing itself. */
 export function getSimilarDresses(dressId, limit = 6) {
   return api(`/api/dresses/${encodeURIComponent(dressId)}/similar?limit=${limit}`);
 }
 
-/**
- * An owner's own listings, pending and rejected included, for the account
- * screen. The email is the ownership proof, the same weak rule deleteDress
- * uses — see the backend for why that's the strongest check available here.
- */
 export function getMyDresses(email) {
   if (!email) return Promise.resolve([]);
   return api(`/api/dresses/mine?email=${encodeURIComponent(email)}`);
 }
 
-/**
- * The admin moderation queue. Password-gated server-side (AdminGuard), unlike
- * the arrangement this replaces, where the admin screen filtered a queue that
- * had already been sent to every anonymous visitor.
- *
- * Resolves with `{ items, total, page, limit, counts }`, where `counts` holds
- * every status regardless of which one was requested — the tab badges read it.
- */
 export function getAdminDresses(status, adminPw, page = 1, category = "") {
   const qs = new URLSearchParams({ status, page: String(page) });
-  /* Omitted rather than sent empty when the admin hasn't picked one: the DTO
-     validates this against the DressCategory enum, and "" is not a member. */
   if (category) qs.set("category", category);
   return api(`/api/admin/dresses?${qs}`, { adminPw });
 }
 
-/**
- * How many booking inquiries reference this dress. Read before showing the
- * owner's delete confirmation, so the dialog can warn that deleting the
- * listing leaves those requests behind.
- */
 export function getDressInquiryCount(dressId) {
   return api(`/api/dresses/${encodeURIComponent(dressId)}/inquiry-count`);
 }
 
-/**
- * Owner deletes their own listing, its photos, and its stored image files.
- *
- * `email` is the ownership proof — this app has no bearer token, so the
- * backend matches it against the listing's own email (see
- * DressesService.deleteDress). Resolves with nothing on success; throws
- * ApiError(403) if the email doesn't match the listing.
- */
 export function deleteDress(dressId, email) {
   return api(`/api/dresses/${encodeURIComponent(dressId)}`, {
     method: "DELETE",
@@ -168,7 +83,6 @@ export function deleteDress(dressId, email) {
   });
 }
 
-/** Admin: append an already-uploaded photo URL to a dress's gallery. */
 export function adminAddDressImage(dressId, url, adminPw) {
   return api(`/api/admin/dresses/${encodeURIComponent(dressId)}/images`, {
     method: "POST",
@@ -177,11 +91,6 @@ export function adminAddDressImage(dressId, url, adminPw) {
   });
 }
 
-/**
- * Admin: remove one photo from a dress's gallery and from storage.
- * Rejects with ApiError(400) when it's the listing's last photo.
- * Both admin image calls resolve with the updated dress.
- */
 export function adminRemoveDressImage(dressId, imageId, adminPw) {
   return api(
     `/api/admin/dresses/${encodeURIComponent(dressId)}/images/${encodeURIComponent(imageId)}`,
@@ -189,18 +98,6 @@ export function adminRemoveDressImage(dressId, imageId, adminPw) {
   );
 }
 
-/**
- * Admin-only: turn selected listing photos into AI on-model photos.
- *
- * Resolves with one entry per requested image —
- * `{ sourceImageId, generatedImageUrl, status, error? }` — and a mix of
- * successes and errors is a normal outcome, not a thrown one. It only rejects
- * if the request itself failed (bad password, unknown dress, network).
- *
- * Slower than every other call in this file: it's one metered generation per
- * image, run concurrently server-side but still ~10s each. Callers should show
- * per-thumbnail progress rather than a blocking spinner.
- */
 export function aiGenerateDressPhotos(dressId, imageIds, adminPw) {
   return api(`/api/admin/dresses/${encodeURIComponent(dressId)}/ai-generate`, {
     method: "POST",
@@ -209,29 +106,14 @@ export function aiGenerateDressPhotos(dressId, imageIds, adminPw) {
   });
 }
 
-/**
- * "צור קשר" form submission. Public and unauthenticated — the sender's email
- * is whatever they typed, not a verified account, which is why the admin view
- * of these is a read-only queue rather than anything that can be replied to
- * in-app.
- *
- * `payload` is `{ name, email, message }`. Rejects with ApiError(400) if the
- * backend's validators disagree with the shape.
- */
 export function submitContactInquiry(payload) {
   return api("/api/contact-inquiries", { method: "POST", body: payload });
 }
 
-/** Admin: every contact-form message, newest first. Password-gated. */
 export function getContactInquiries(adminPw) {
   return api("/api/contact-inquiries", { adminPw });
 }
 
-/**
- * Admin: flag a message as dealt with (or un-flag it). Resolves with the
- * updated row, so the caller can replace it in place rather than refetching
- * the whole list.
- */
 export function setContactInquiryHandled(id, handled, adminPw) {
   return api(`/api/contact-inquiries/${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -240,7 +122,6 @@ export function setContactInquiryHandled(id, handled, adminPw) {
   });
 }
 
-/** Admin: delete a contact-form message. Resolves with nothing (204). */
 export function deleteContactInquiry(id, adminPw) {
   return api(`/api/contact-inquiries/${encodeURIComponent(id)}`, {
     method: "DELETE",
@@ -248,32 +129,14 @@ export function deleteContactInquiry(id, adminPw) {
   });
 }
 
-/**
- * Sends a 6-digit email OTP. Shared by registration, forgot-password, and
- * account deletion — one code system, keyed only by email, no "purpose"
- * field — so this is the same call AuthContext's own postJson makes for
- * those flows, just going through the shared `api()` helper instead.
- */
 export function sendOtp(email) {
   return api("/api/auth/send-otp", { method: "POST", body: { email } });
 }
 
-/**
- * Self-service account deletion: verifies the OTP and removes the account,
- * its listings, and their images in one call (see UsersController /
- * UsersService.deleteAccount on the backend). Booking inquiries the user
- * sent are deliberately left behind as anonymized snapshots — see the
- * backend for why.
- */
 export function deleteAccount(email, code) {
   return api("/api/auth/delete-account", { method: "POST", body: { email, code } });
 }
 
-/**
- * Upload one listing photo and get back its public Cloudflare R2 URL.
- * Sent as multipart rather than JSON — the bytes never pass through the
- * dress record, only the resulting URL does.
- */
 export async function uploadDressImage(file, dressId) {
   const form = new FormData();
   form.append("file", file);
@@ -281,7 +144,6 @@ export async function uploadDressImage(file, dressId) {
   const qs = dressId ? `?dressId=${encodeURIComponent(dressId)}` : "";
   let res;
   try {
-    // No Content-Type header: the browser sets the multipart boundary.
     res = await fetch(withBase("/api/dresses/images" + qs), {
       method: "POST",
       body: form,

@@ -1,9 +1,5 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 
-/**
- * Simple admin gate. Expects header `x-admin-password` to match ADMIN_PASSWORD.
- * Demo only — replace with real auth (JWT / sessions) for production.
- */
 export const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'onenight2026';
 
 @Injectable()

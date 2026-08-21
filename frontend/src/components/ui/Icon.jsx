@@ -1,5 +1,3 @@
-/* Inline icon set for metadata, navigation and controls. Each entry is a
-   render function taking SVG props (width/height/className/style). */
 export const Icon = {
   pin: (p) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...p}>
@@ -79,9 +77,7 @@ export const Icon = {
   ),
   whatsapp: (p) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...p}>
-      {/* Tabler-style "brand-whatsapp" outline: rounded chat-bubble-with-tail
-          plus the handset S-curve — the actual recognizable WhatsApp mark,
-          not just a generic phone glyph. */}
+      {}
       <path d="M3 21l1.65-3.8a9 9 0 1 1 3.4 2.9L3 21Z" />
       <path d="M9 10a.5.5 0 0 0 1 0v-1a.5.5 0 0 0-1 0v1a5 5 0 0 0 5 5h1a.5.5 0 0 0 0-1h-1a.5.5 0 0 0 0 1" />
     </svg>

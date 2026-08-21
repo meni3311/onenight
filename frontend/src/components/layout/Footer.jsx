@@ -1,21 +1,11 @@
 import { Icon } from "../ui/Icon.jsx";
 
-/* Social links, in the requested display order (WhatsApp, Facebook,
-   Instagram) — DOM order = visual order here since the row is a plain flex
-   row under the site's existing direction:rtl, same as before. Instagram/
-   Facebook are placeholders until the real accounts are provided; WhatsApp
-   reuses the number shown above in "יצירת קשר" (058-6770772 →
-   wa.me/972586770772). */
 const SOCIAL_LINKS = [
   { key: "whatsapp", label: "וואטסאפ", href: "https://wa.me/972586770772" },
   { key: "facebook", label: "פייסבוק", href: "#" },
   { key: "instagram", label: "אינסטגרם", href: "#" },
 ];
 
-/* Site footer: brand blurb + contact details, stacked and centered (the
-   "ניווט" column was dropped — those links already exist elsewhere in the
-   site, e.g. the navbar/user menu). The `.footer` styles live in
-   styles.css; static spacing/typography use Tailwind utilities. */
 export function Footer({ go, toast }) {
   const year = new Date().getFullYear();
   return (
@@ -33,8 +23,7 @@ export function Footer({ go, toast }) {
           <p className="m-0 leading-[2]">
             מייל: menicamp@gmail.com<br />
             וואטסאפ: 058-6770772<br />
-            {/* Same destination as the navbar's "צור קשר" — the contact page
-                carries these details plus the FAQ and the message form. */}
+            {}
             <a className="cursor-pointer" onClick={() => go && go("contact")}>צור קשר</a><br />
             <a onClick={() => toast("תקנון האתר")}>תקנון ותנאי שימוש</a>
           </p>

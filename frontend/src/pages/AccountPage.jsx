@@ -9,11 +9,6 @@ import { useAuth } from "../context/AuthContext.jsx";
 
 const OTP_RE = /^\d{6}$/;
 
-/* Inline edit form for one of the user's dress listings.
-
-   Carries the same fields as the publish form for everything this feature
-   touches — category, sizes, the bridesmaid set count and hashtags are all
-   editable after the fact, not just at creation. */
 function EditFields({ d, setD }) {
   const set = (k, val) => setD((p) => ({ ...p, [k]: val }));
   return (
@@ -28,9 +23,6 @@ function EditFields({ d, setD }) {
               type="button"
               aria-pressed={d.category === c.value}
               className={"chip" + (d.category === c.value ? " on" : "")}
-              /* Switching away from bridesmaid clears the count here as well
-                 as server-side, so the input doesn't keep a stale number
-                 alive behind a hidden field. */
               onClick={() => setD((p) => ({
                 ...p,
                 category: c.value,
@@ -74,45 +66,24 @@ function EditFields({ d, setD }) {
 const STATUS_LABELS = { approved: "מאושרת", pending: "ממתינה", rejected: "נדחתה" };
 const TABS = [["ads", "המודעות שלי"], ["account", "פרטי חשבון"]];
 
-/* Signed-in user's area: their listings (each with its own inline edit
-   flow, availability calendar included) and editable account details.
-   Favorites live on their own page, reached via "המועדפים שלי" in the
-   personal-area dropdown — not a tab here. */
 export default function AccountPage({ user, onOpen, setUser, toast, initialTab }) {
   const { requestPublish, logout } = useAuth();
   const [tab, setTab] = useState(initialTab || "ads");
-  /* This page fetches its own listings. The browse list is one page of
-     approved listings, so "my listings" — pending and rejected very much
-     included — has to be its own request. */
   const [dresses, setDresses] = useState([]);
   const [adsLoading, setAdsLoading] = useState(true);
   const [editing, setEditing] = useState(null);
-  /* Delete confirmation. `deleting` holds the dress awaiting confirmation;
-     `deleteInquiries` is how many booking requests point at it — null while
-     that count is still loading, so the dialog can hold off on the warning
-     line rather than flashing "0 requests" and then correcting itself. */
   const [deleting, setDeleting] = useState(null);
   const [deleteInquiries, setDeleteInquiries] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
-  /* Account deletion — two steps, same correlated verify-then-act shape as
-     the backend: a plain-language confirmation first (`acctDeleteConfirm`),
-     then an emailed 6-digit code (`acctDeleteOtp`) before anything is
-     actually removed. Separate from the dress-delete state above; the two
-     flows never overlap. */
   const [acctDeleteConfirm, setAcctDeleteConfirm] = useState(false);
   const [acctDeleteOtp, setAcctDeleteOtp] = useState(false);
   const [acctDeleteCode, setAcctDeleteCode] = useState("");
   const [acctDeleteError, setAcctDeleteError] = useState("");
   const [acctDeleteBusy, setAcctDeleteBusy] = useState(false);
 
-  /* Route stays "account" across dropdown clicks (e.g. listings → profile),
-     so the page doesn't remount — resync the active tab when it changes. */
   useEffect(() => { if (initialTab) setTab(initialTab); }, [initialTab]);
 
-  /* Ownership is keyed by email (the account identity from the OTP auth
-     flow), not phone — the OTP flow never collects a phone number, so
-     phone-based matching left every account's listings empty. */
   const myEmail = (user.email || "").trim().toLowerCase();
 
   useEffect(() => {
@@ -127,8 +98,6 @@ export default function AccountPage({ user, onOpen, setUser, toast, initialTab }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myEmail]);
 
-  /* The server already scoped this to the owner, so no second filter here —
-     the name stays because the rest of the page reads it. */
   const myAds = dresses;
 
   const saveEdit = async () => {
@@ -137,9 +106,6 @@ export default function AccountPage({ user, onOpen, setUser, toast, initialTab }
         title: editing.title, desc: editing.desc, color: editing.color, price: +editing.price,
         condition: editing.condition, region: editing.region,
         sizes: editing.sizes, category: editing.category, hashtags: editing.hashtags,
-        /* Omitted rather than sent as null for non-bridesmaid listings: the
-           DTO validates it as an int when present, and the service nulls it
-           for other categories anyway (resolveBridesmaidSetCount). */
         ...(editing.category === "bridesmaid"
           ? { bridesmaidSetCount: +editing.bridesmaidSetCount }
           : {}),
@@ -148,17 +114,11 @@ export default function AccountPage({ user, onOpen, setUser, toast, initialTab }
       setEditing(null); toast("הפרטים עודכנו ✓");
     } catch (e) { toast("עדכון נכשל: " + e.message); }
   };
-  /* Open the confirmation, then fetch the inquiry count in the background.
-     The dialog opens immediately rather than waiting on the count — the
-     count only enriches the warning, and blocking the whole interaction on
-     it would make the button feel broken if the request is slow. */
   const askDelete = (d) => {
     setDeleting(d);
     setDeleteInquiries(null);
     getDressInquiryCount(d.id)
       .then((r) => setDeleteInquiries(r?.count ?? 0))
-      // A failed count must not block the delete; fall back to no warning
-      // line rather than blocking or guessing a number.
       .catch(() => setDeleteInquiries(0));
   };
 
@@ -168,9 +128,6 @@ export default function AccountPage({ user, onOpen, setUser, toast, initialTab }
     try {
       await deleteDress(deleting.id, myEmail);
       setDresses((p) => p.filter((d) => d.id !== deleting.id));
-      // The row is about to unmount — drop any edit session pointed at it,
-      // or the inline edit form would linger with a dress that no longer
-      // exists behind it.
       if (editing && editing.id === deleting.id) setEditing(null);
       setDeleting(null);
       toast("המודעה נמחקה");
@@ -187,9 +144,6 @@ export default function AccountPage({ user, onOpen, setUser, toast, initialTab }
     catch (e) { toast("שמירת היומן נכשלה: " + e.message); }
   };
 
-  /* Step 1 → step 2: the plain-language warning is confirmed, so send the
-     code and swap to the OTP dialog. Also used as "לא קיבלתי קוד" resend
-     from step 2 itself, since it's the same request either way. */
   const sendAcctDeleteCode = async () => {
     if (acctDeleteBusy) return;
     setAcctDeleteBusy(true);
@@ -207,10 +161,6 @@ export default function AccountPage({ user, onOpen, setUser, toast, initialTab }
     }
   };
 
-  /* Step 2: verify the code and delete for real. `logout()` clears the
-     signed-in session on success — navigation off this now-invalid page is
-     left to the same "please sign in" fallback AccountRoute already shows
-     a signed-out visitor, rather than wiring a dedicated redirect. */
   const confirmAcctDelete = async () => {
     if (acctDeleteBusy) return;
     if (!OTP_RE.test(acctDeleteCode)) { setAcctDeleteError("יש להזין קוד בן 6 ספרות"); return; }
@@ -261,13 +211,6 @@ export default function AccountPage({ user, onOpen, setUser, toast, initialTab }
               <button className="btn btn-ghost" onClick={() => setEditing(null)}>ביטול</button>
             </div>}
             {editing && editing.id === d.id && (
-              /* Availability calendar for this specific dress, scoped by
-                 `d.id` straight from this row's own context — no dress
-                 selector, since we're already inside that dress's edit
-                 flow. Reads/writes `d.booked` (the live dresses-state
-                 object, not the `editing` draft) so it reflects toggles
-                 immediately; each toggle PATCHes independently of the
-                 "שמירה" button, same as before. */
               <div className="mt-4 border-t border-[var(--border)] pt-3">
                 <p className="text-[13px] font-semibold text-[var(--text)]">יומן זמינות</p>
                 <p className="mx-0 mb-2.5 mt-1 text-[13px] text-[var(--muted)]">סמני תאריכים שבהן השמלה אינה זמינה</p>
@@ -299,8 +242,7 @@ export default function AccountPage({ user, onOpen, setUser, toast, initialTab }
         </div>
       </div>}
 
-      {/* Account deletion, step 1: plain-language confirmation listing what
-          gets removed, before any code is even sent. */}
+      {}
       <ConfirmModal
         open={acctDeleteConfirm}
         title="למחוק את החשבון?"
@@ -316,10 +258,7 @@ export default function AccountPage({ user, onOpen, setUser, toast, initialTab }
         onCancel={() => { if (!acctDeleteBusy) setAcctDeleteConfirm(false); }}
       />
 
-      {/* Step 2: the emailed code. Reuses the same OTP infrastructure as
-          registration / forgot-password (POST /api/auth/send-otp + the
-          6-digit code), just gated behind the warning above instead of an
-          identity check. */}
+      {}
       <ConfirmModal
         open={acctDeleteOtp}
         title="אימות מחיקת חשבון"
@@ -347,18 +286,12 @@ export default function AccountPage({ user, onOpen, setUser, toast, initialTab }
         </button>
       </ConfirmModal>
 
-      {/* Delete confirmation. Reuses the shared glass dialog rather than
-          window.confirm so it matches the auth modal's family, and so the
-          inquiry warning has somewhere to live — a native confirm can't
-          carry it. */}
+      {}
       <ConfirmModal
         open={!!deleting}
         title="למחוק את המודעה?"
         message={deleting ? (
           `"${deleting.title}" והתמונות שלה יימחקו לצמיתות ולא ניתן יהיה לשחזר אותן.` +
-          /* Disclosed rather than silent: these requests survive the
-             deletion on purpose, so the owner hears it before confirming
-             instead of wondering later why the renter still called. */
           (deleteInquiries > 0
             ? ` שימי לב: יש ${deleteInquiries} בקשות הזמנה למודעה הזו. הפרטים יישמרו אצלנו כדי שנוכל לחזור לשוכרות, אבל המודעה עצמה תיעלם מהאתר.`
             : "")

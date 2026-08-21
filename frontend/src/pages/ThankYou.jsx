@@ -1,19 +1,6 @@
 import { COLORS } from "../constants/theme.js";
 import { Confetti } from "../components/ui/Confetti.jsx";
 
-/* Confirmation screen shown after a dress is submitted for review.
-   Boutique-luxury redesign: cream canvas, bordeaux/rose accents, Lora
-   italic heading + Assistant body (matching the rest of the site's
-   editorial pairing), sharp (non-rounded) corners, and a line-art
-   checkmark instead of a generic icon.
-
-   Confetti + the frosted message card are the celebratory layer on top of
-   that: the card reuses the same translucent/blurred/rose-bordered glass
-   language as ConfirmModal and the auth modal's "welcome" popup, just in
-   this page's own light cream palette instead of their dark one — festive
-   rather than a dialog box dropped onto the page. Corners stay sharp
-   (0, not the modal family's 20px) to match the rest of the site's
-   buttons/cards/chips, not the one place that uses heavy rounding. */
 export default function ThankYou({ goHome }) {
   return (
     <div
@@ -33,8 +20,7 @@ export default function ThankYou({ goHome }) {
     >
       <Confetti />
 
-      {/* Soft bordeaux/rose glow behind the card — blurred and low-opacity,
-          for warmth rather than a loud graphic. */}
+      {}
       <div
         aria-hidden="true"
         style={{
@@ -69,8 +55,7 @@ export default function ThankYou({ goHome }) {
           width: "100%",
         }}
       >
-        {/* Sharp-cornered frame around a hand-drawn-feeling check stroke —
-            same line-weight convention as the rest of the site's icon set. */}
+        {}
         <div
           aria-hidden="true"
           style={{

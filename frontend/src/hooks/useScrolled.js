@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
 
-/* True once the page has scrolled past `threshold` px. Drives the
-   header's blur-on-scroll treatment. */
 export function useScrolled(threshold = 8) {
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {

@@ -7,11 +7,6 @@ import { ResetLink } from "./ResetLink.jsx";
 import { SearchButton } from "./SearchButton.jsx";
 import { activeFilterCount, EMPTY_FILTERS } from "./filterConstants.js";
 
-/* Floating filter trigger + centered frosted-glass filter modal.
-   The trigger only appears once the gallery (#browse) is in view.
-   `children` (e.g. the sort button) render alongside the trigger in the
-   same fixed/centered row, so any floating sibling controls fade in/out
-   together with it and sit visually paired next to it. */
 export function FilterSidebar({ f, setF, resultCount, children }) {
   const [open, setOpen] = useState(false);
   const [panelIn, setPanelIn] = useState(false);
@@ -30,7 +25,7 @@ export function FilterSidebar({ f, setF, resultCount, children }) {
 
   return (
     <>
-      {/* Floating trigger row — burgundy frosted glass, centered at the bottom */}
+      {}
       <div
         style={{
           opacity: showTrigger ? 1 : 0,
@@ -63,10 +58,10 @@ export function FilterSidebar({ f, setF, resultCount, children }) {
         {children}
       </div>
 
-      {/* Centered floating frosted-glass card */}
+      {}
       {open && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          {/* overlay — click to close */}
+          {}
           <div
             onClick={closeModal}
             style={{
@@ -77,7 +72,7 @@ export function FilterSidebar({ f, setF, resultCount, children }) {
               transition: "opacity 0.3s ease",
             }}
           />
-          {/* glass card */}
+          {}
           <div
             role="dialog"
             aria-modal="true"
@@ -99,7 +94,7 @@ export function FilterSidebar({ f, setF, resultCount, children }) {
             }}
             className="flex flex-col overflow-hidden"
           >
-            {/* Header */}
+            {}
             <div className="flex items-center justify-between px-6 pb-3 pt-5" style={{ borderBottom: "1px solid rgba(255,255,255,0.10)" }}>
               <div className="flex items-baseline gap-3">
                 <h2 style={{ fontFamily: "'Jost','Assistant',system-ui,sans-serif", fontWeight: 600, fontSize: "20px", letterSpacing: "0.5px", color: "#F7ECE9" }}>
@@ -118,7 +113,7 @@ export function FilterSidebar({ f, setF, resultCount, children }) {
               </button>
             </div>
 
-            {/* Scrollable filters */}
+            {}
             <div
               className="glass-scroll flex-1 px-6 py-4"
               style={{ overflowY: "auto", scrollbarWidth: "none", msOverflowStyle: "none" }}
@@ -126,7 +121,7 @@ export function FilterSidebar({ f, setF, resultCount, children }) {
               <FilterContent f={f} setF={setF} />
             </div>
 
-            {/* Centered round search button */}
+            {}
             <div className="px-6 pb-6 pt-3" style={{ borderTop: "1px solid rgba(255,255,255,0.10)" }}>
               <SearchButton resultCount={resultCount} onClick={closeModal} />
             </div>

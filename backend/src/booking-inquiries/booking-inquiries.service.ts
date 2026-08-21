@@ -20,7 +20,6 @@ export class BookingInquiriesService {
     });
   }
 
-  /** Admin listing — most recent first. */
   list() {
     return this.prisma.bookingInquiry.findMany({
       orderBy: { createdAt: 'desc' },

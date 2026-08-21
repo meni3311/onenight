@@ -1,7 +1,4 @@
-/* Filter domain constants + the empty-filter shape and active-count helper. */
 
-/* Curated color swatches (name → hex) for the filter + chips.
-   `name` is the matchable value (matches d.color in data). */
 export const COLOR_SWATCHES = [
   { name: "לבן", hex: "#FFFFFF" },
   { name: "שחור", hex: "#2A2A2A" },
@@ -15,29 +12,17 @@ export const COLOR_SWATCHES = [
   { name: "סגול", hex: "#5E4B79" },
 ];
 
-/* Letter sizes only — numeric sizes are intentionally omitted from the filter
-   UI (see SIZES in lib/data.js — the two lists are separate on purpose, not a
-   duplication).
-
-"אחר" is not in this list either, and is not a matchable value anywhere:
-   SizeMultiSelect renders it as a chip that reveals a free-text box, and
-   whatever that box produces joins `f.sizes` alongside the letters, matched
-   exactly against the dress's own sizes. That box is also the only way to
-   filter for a numeric size, since this list deliberately offers none. */
 export const LETTER_SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
 
-/* Source filter options: [value, label]. "הכל" (all) is the default. */
 export const SOURCE_OPTIONS = [
   ["all", "הכל"],
   ["תפירה אישית", "תפירה אישית"],
   ["שם חנות", "בוטיק / חנות"],
 ];
 
-/* Dress-length / sleeve-length filter options (short / medium / long). */
 export const DRESS_LENGTH_OPTIONS = ["קצר", "אמצע", "ארוך"];
 export const SLEEVE_LENGTH_OPTIONS = ["קצר", "אמצע", "ארוך"];
 
-/* Price slider bounds (₪) — single draggable range slider, 0 to 1000. */
 export const PRICE = { min: 0, max: 1000, step: 10 };
 
 export const EMPTY_FILTERS = {
@@ -47,30 +32,14 @@ export const EMPTY_FILTERS = {
   maxPrice: PRICE.max,
   regions: [],
   sizes: [],
-  /* Multi-select like colours and sizes, not single-select like `source`.
-     The homepage's category tiles will just set one value here. */
   categories: [],
   dressLengths: [],
   sleeveLengths: [],
   source: "all",
 };
 
-/* How many dresses one page of the gallery holds. Must not exceed
-   MAX_PAGE_LIMIT in the backend's browse-dresses.dto.ts, which rejects
-   anything larger; it's also the only page size the server will cache, so
-   changing it here without changing it there silently costs every cache hit. */
 export const PAGE_LIMIT = 24;
 
-/* Serialize the filter state into the browse endpoint's query string.
-
-   Anything still at its default is deliberately OMITTED rather than sent
-   explicitly. That isn't cosmetic: the server only caches requests that carry
-   no filter params at all (see browseCacheKey in dresses.service.ts), so
-   sending `minPrice=0&maxPrice=1000` on the homepage's first load — which is
-   what the untouched slider holds — would look like a filtered query and miss
-   the cache on the one request every visitor makes.
-
-   Multi-selects go over as comma-separated values, matching the DTO. */
 export function filtersToQuery(f, sort, page, limit = PAGE_LIMIT) {
   const p = new URLSearchParams();
 
@@ -92,7 +61,6 @@ export function filtersToQuery(f, sort, page, limit = PAGE_LIMIT) {
   return qs ? `?${qs}` : "";
 }
 
-/* Number of filters the user has actively changed from their defaults. */
 export function activeFilterCount(f) {
   return (
     f.regions.length +

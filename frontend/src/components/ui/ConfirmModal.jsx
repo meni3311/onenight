@@ -1,12 +1,5 @@
 import { Icon } from "./Icon.jsx";
 
-/* Shared glass confirm dialog — same visual family already used for the
-   auth modal and its "welcome" popup in AuthContext.jsx (and mirrored
-   again in ProductPage's sign-in prompt): dark glass card centered over a
-   blurred dark overlay, bordeaux/rose accents, radius-20 card, Assistant
-   body copy. Generic (title/message/confirm/cancel) so any yes/no
-   confirmation in the app can reuse this instead of hand-rolling another
-   copy of the same overlay. */
 export function ConfirmModal({
   open,
   title,
@@ -90,10 +83,7 @@ export function ConfirmModal({
           </p>
         )}
 
-        {/* Optional extra content between the message and the buttons — e.g.
-            a code-entry field for a confirmation that needs one, like
-            account deletion's OTP step. Nothing renders here unless a
-            caller passes children, so every existing usage is unaffected. */}
+        {}
         {children && <div style={{ marginTop: "16px", textAlign: "start" }}>{children}</div>}
 
         <div className="flex flex-col" style={{ gap: "12px", marginTop: "24px" }}>

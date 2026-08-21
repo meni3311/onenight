@@ -1,7 +1,6 @@
 import { Icon } from "../ui/Icon.jsx";
 import { COLORS, FONTS } from "../../constants/theme.js";
 
-/* Round burgundy-glass "search" button + live result count for the panel. */
 export function SearchButton({ resultCount, onClick }) {
   return (
     <div className="flex flex-col items-center pt-1">
