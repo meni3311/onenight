@@ -117,7 +117,7 @@ export function AdminPhotosPanel({ dress, adminPw, onUpdated, toast }) {
 
   /* ── Download ───────────────────────────────────────────────────────────
      Fetched and saved as a blob rather than a plain `<a href download>` —
-     the images live on Supabase Storage's own origin, and browsers ignore
+     the images live on Cloudflare R2's own public origin, and browsers ignore
      the `download` attribute on a cross-origin link and just navigate to it
      instead of saving. Fetching the bytes ourselves and handing the browser
      an object URL forces an actual save regardless of origin. */

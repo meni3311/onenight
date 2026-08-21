@@ -5,14 +5,13 @@ import { useEffect, useState } from "react";
 
    Scope: user *preferences* only — the favourites list ("onenight_favs")
    and the signed-in user ("onenight_user"). Listing data must never go
-   through here. Dresses and their photos live in Postgres and Supabase
-   Storage; a browser-local copy is what made them invisible across
-   sessions and devices in the first place.
+   through here. Dresses live in Postgres and their photos in Cloudflare R2;
+   a browser-local copy is what makes them invisible across sessions and
+   devices.
 
-   The read/write helpers used to be a shared `LS` object in lib/data.js.
-   They're inlined here now that this is the only legitimate caller — a
+   The read/write helpers are inlined rather than shared, deliberately: a
    general-purpose storage utility sitting next to the dress code is an
-   invitation to cache listings in it again. */
+   invitation to cache listings in it. */
 
 function read(key, fallback) {
   try {

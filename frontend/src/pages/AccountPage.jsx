@@ -81,11 +81,9 @@ const TABS = [["ads", "המודעות שלי"], ["account", "פרטי חשבון
 export default function AccountPage({ user, onOpen, setUser, toast, initialTab }) {
   const { requestPublish, logout } = useAuth();
   const [tab, setTab] = useState(initialTab || "ads");
-  /* This page owns its listings now. It used to filter the app-wide browse
-     array by email, which worked only because that array was the entire
-     database — every dress at every status, sent to every visitor. The
-     browse list is one page of approved listings, so "my listings"
-     (pending and rejected very much included) has to be its own request. */
+  /* This page fetches its own listings. The browse list is one page of
+     approved listings, so "my listings" — pending and rejected very much
+     included — has to be its own request. */
   const [dresses, setDresses] = useState([]);
   const [adsLoading, setAdsLoading] = useState(true);
   const [editing, setEditing] = useState(null);

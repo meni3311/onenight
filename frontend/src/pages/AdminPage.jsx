@@ -1,22 +1,39 @@
 import { useState, useEffect } from "react";
 import { placeholder, CATEGORIES, CATEGORY_LABELS } from "../lib/data.js";
-import { api, getAdminDresses, getDress, withBase } from "../lib/api.js";
+import {
+  api,
+  deleteContactInquiry,
+  getAdminDresses,
+  getContactInquiries,
+  getDress,
+  setContactInquiryHandled,
+  withBase,
+} from "../lib/api.js";
 import { AdminPhotosPanel } from "../components/admin/AdminPhotosPanel.jsx";
 import { useSessionStorage } from "../hooks/useSessionStorage.js";
 
 const STATUS_LABELS = { approved: "מאושרת", pending: "ממתינה", rejected: "נדחתה" };
 const TABS = [["pending", "ממתינות"], ["approved", "מאושרות"], ["rejected", "נדחו"]];
 
-/* Email stub — in production this would call Resend / EmailJS. */
-function sendEmail(type, d) {
-  const link = location.origin + location.pathname + "#dress=" + d.id;
-  if (type === "approve") {
-    console.log("[EMAIL → " + d.email + "] נושא: השמלה שלך התקבלה לאתר onenight! 🎉\n" +
-      'שלום, שמחות לבשר שהשמלה "' + d.title + '" עלתה לאתר ומחכה לשוכרת הבאה. צפייה: ' + link);
-  } else {
-    console.log("[EMAIL → " + d.email + "] נושא: עדכון לגבי המודעה שלך ב-onenight\n" +
-      'שלום, לצערנו המודעה "' + d.title + '" לא אושרה כרגע. סיבה: ' + (d.rejectReason || "") + ". נשמח שתעדכני ותשלחי שוב 💛");
-  }
+/* Tabs that are not a slice of the moderation queue. Each has its own
+   endpoint and its own loader, and neither wants the dress category filter
+   or the queue fetch. A set rather than a chain of comparisons, so adding
+   another one is a single edit here. */
+const NON_QUEUE_TABS = new Set(["inquiries", "contact"]);
+
+/* Approval and rejection emails are sent by the backend
+   (DressesService.updateStatus → MailService → Resend); the PATCH response
+   carries a `notification` object saying whether the send succeeded, which
+   is what the toasts below report. */
+
+/* Turn the PATCH /status response into an honest toast. `notification` is
+   absent when the decision doesn't notify anyone (e.g. re-saving a status
+   that was already set), in which case there is nothing to claim. */
+function decisionToast(base, res) {
+  const n = res?.notification;
+  if (!n) return base;
+  if (n.emailSent) return `${base} — נשלח מייל למפרסמת`;
+  return `${base} — אך ${n.emailError || "שליחת המייל נכשלה"}`;
 }
 
 /* Booking-inquiry helpers — raw fetch rather than the shared `api()` helper,
@@ -56,12 +73,7 @@ export default function AdminPage({ toast, onOpen }) {
   const [aiImagining, setAiImagining] = useState(null);
 
   /* The moderation queue, fetched from the guarded endpoint with the stored
-     password.
-
-     It used to be handed down from App, which had fetched it with
-     `?status=all` on an endpoint with no authentication at all — so the queue
-     was sent to every anonymous visitor and this screen merely chose not to
-     draw it. The password gates the data now, not the rendering.
+     password — the password gates the data, not just the rendering.
 
      `counts` comes back with every status regardless of which tab is open, so
      the badges don't need the other tabs loaded. */
@@ -93,6 +105,51 @@ export default function AdminPage({ toast, onOpen }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, authed]);
 
+  /* Contact-form messages ("צור קשר" → ContactPage.jsx). Same lazy-on-open,
+     refetch-every-time pattern as the booking inquiries above: the whole
+     point of this queue is that it's current, and there is no push channel
+     telling this screen a new message arrived. */
+  const [contactInquiries, setContactInquiries] = useState([]);
+  const [contactLoading, setContactLoading] = useState(false);
+
+  const loadContactInquiries = async () => {
+    setContactLoading(true);
+    try {
+      setContactInquiries(await getContactInquiries(pw));
+    } catch (e) {
+      toast("טעינת הפניות נכשלה: " + e.message);
+    } finally {
+      setContactLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "contact" && authed) loadContactInquiries();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, authed]);
+
+  /* Optimism would be wrong here: the row is replaced with what the server
+     returned, so a rejected update leaves the checkbox showing the truth
+     rather than the intent. */
+  const toggleContactHandled = async (inq) => {
+    try {
+      const updated = await setContactInquiryHandled(inq.id, !inq.handled, pw);
+      setContactInquiries((p) => p.map((x) => (x.id === updated.id ? updated : x)));
+    } catch (e) {
+      toast("עדכון הפנייה נכשל: " + e.message);
+    }
+  };
+
+  const removeContactInquiry = async (id) => {
+    try {
+      await deleteContactInquiry(id, pw);
+      setContactInquiries((p) => p.filter((x) => x.id !== id));
+      toast("הפנייה נמחקה");
+    } catch (e) {
+      toast("מחיקת הפנייה נכשלה: " + e.message);
+    }
+  };
+
   /* Reload the queue whenever the tab changes — each status is its own
      request now rather than a filter over one big array. Approve/reject
      update the loaded rows in place, so this doesn't refire on a moderation
@@ -115,7 +172,7 @@ export default function AdminPage({ toast, onOpen }) {
   };
 
   useEffect(() => {
-    if (!authed || tab === "inquiries") return;
+    if (!authed || NON_QUEUE_TABS.has(tab)) return;
     loadQueue(tab, categoryFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, authed, categoryFilter]);
@@ -152,6 +209,7 @@ export default function AdminPage({ toast, onOpen }) {
     setPw("");
     setAuthed(false);
     setInquiries([]);
+    setContactInquiries([]);
     toast("יצאת מפאנל הניהול");
   };
 
@@ -207,18 +265,18 @@ export default function AdminPage({ toast, onOpen }) {
 
   const approve = async (d) => {
     try {
-      await api("/api/dresses/" + d.id + "/status", { method: "PATCH", adminPw: pw, body: { status: "approved" } });
+      const res = await api("/api/dresses/" + d.id + "/status", { method: "PATCH", adminPw: pw, body: { status: "approved" } });
       applyDecision(d.id, d.status, "approved");
-      toast("השמלה אושרה ✓ — נשלח מייל למפרסמת");
-      sendEmail("approve", d);
+      /* The email is the backend's job now, and the toast reports what it
+         actually did rather than asserting it in advance. */
+      toast(decisionToast("השמלה אושרה ✓", res));
     } catch (e) { toast("אישור נכשל: " + e.message); }
   };
   const doReject = async () => {
     try {
-      await api("/api/dresses/" + rejecting.id + "/status", { method: "PATCH", adminPw: pw, body: { status: "rejected", rejectReason: reason } });
+      const res = await api("/api/dresses/" + rejecting.id + "/status", { method: "PATCH", adminPw: pw, body: { status: "rejected", rejectReason: reason } });
       applyDecision(rejecting.id, rejecting.status, "rejected");
-      sendEmail("reject", { ...rejecting, rejectReason: reason });
-      toast("השמלה נדחתה — נשלח מייל למפרסמת");
+      toast(decisionToast("השמלה נדחתה", res));
       setRejecting(null); setReason("");
     } catch (e) { toast("דחייה נכשלה: " + e.message); }
   };
@@ -229,11 +287,9 @@ export default function AdminPage({ toast, onOpen }) {
 
   /* An inquiry row keeps its own snapshot of the listing (title, both phone
      numbers) precisely so it outlives the dress — see the note on
-     deleteDress. Only "view the dress" needs the live record, and it used to
-     be looked up in the app-wide array, which meant the button silently read
-     "השמלה כבר לא זמינה" for any listing that merely wasn't loaded. Fetched
-     on click instead, so a missing dress is an actual 404 rather than a
-     guess from what happens to be in memory. */
+     deleteDress. Only "view the dress" needs the live record, so it is
+     fetched on click — a missing dress is then an actual 404 rather than a
+     guess from whatever happens to be in memory. */
   const openInquiryDress = async (dressId) => {
     try {
       const dress = await getDress(dressId);
@@ -260,11 +316,21 @@ export default function AdminPage({ toast, onOpen }) {
         <button className={"tab" + (tab === "inquiries" ? " on" : "")} onClick={() => setTab("inquiries")}>
           בקשות הזמנה
         </button>
+        {/* Contact-form messages. The badge counts what's still open rather
+            than the whole list — a queue that only ever grows stops being a
+            number anyone reads. It's blank until the tab has been opened
+            once, because the list isn't fetched before then. */}
+        <button className={"tab" + (tab === "contact" ? " on" : "")} onClick={() => setTab("contact")}>
+          פניות
+          {contactInquiries.length > 0
+            ? ` (${contactInquiries.filter((x) => !x.handled).length})`
+            : ""}
+        </button>
       </div>
 
-      {/* Category filter for the moderation queue. Hidden on the inquiries
-          tab, which lists booking requests rather than dresses. */}
-      {tab !== "inquiries" && (
+      {/* Category filter for the moderation queue. Hidden on the tabs that
+          list something other than dresses. */}
+      {!NON_QUEUE_TABS.has(tab) && (
         <div className="chips mb-3">
           <button
             type="button"
@@ -319,6 +385,52 @@ export default function AdminPage({ toast, onOpen }) {
               </div>
             );
           })}
+        </>
+      ) : tab === "contact" ? (
+        <>
+          {contactLoading && <div className="empty">טוענת פניות…</div>}
+          {!contactLoading && contactInquiries.length === 0 && (
+            <div className="empty">אין פניות עדיין.</div>
+          )}
+          {!contactLoading && contactInquiries.map((c) => (
+            <div
+              key={c.id}
+              className="admin-row"
+              /* Handled messages recede rather than disappear: the admin
+                 still wants to find "that message from last week", and a
+                 filter would hide it behind a control nobody would think to
+                 look for. */
+              style={c.handled ? { opacity: 0.55 } : undefined}
+            >
+              <div className="flex-1">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <strong className="serif text-[20px]">{c.name}</strong>
+                  {c.handled && <span className="status-pill status-approved">טופלה</span>}
+                  <span className="card-meta">נשלח: {fmtDateTime(c.createdAt)}</span>
+                </div>
+                <div className="card-meta">
+                  {/* dir=ltr so the address isn't visually reordered inside
+                      the RTL row. */}
+                  <span dir="ltr">{c.email}</span>
+                </div>
+                {/* whitespace-pre-line: the visitor typed this into a
+                    textarea and their line breaks are part of the message. */}
+                <p className="my-1.5 whitespace-pre-line text-[13px] text-[var(--text)]">{c.message}</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <a
+                    className="btn btn-ghost"
+                    href={`mailto:${c.email}?subject=${encodeURIComponent("בנוגע לפנייתך ל-onenight")}`}
+                  >
+                    ✉️ מענה במייל
+                  </a>
+                  <button className="btn btn-ghost" onClick={() => toggleContactHandled(c)}>
+                    {c.handled ? "↩️ סימון כלא טופלה" : "✅ סימון כטופלה"}
+                  </button>
+                  <button className="btn btn-rose" onClick={() => removeContactInquiry(c.id)}>🗑️ מחיקה</button>
+                </div>
+              </div>
+            </div>
+          ))}
         </>
       ) : (
       <>

@@ -53,19 +53,15 @@ const csv = () =>
 /**
  * Query for the public browse list — `GET /api/dresses`.
  *
- * Every filter the homepage applied in the browser (App.jsx's `visible`/
- * `sorted` memos) is expressed here instead, because the client no longer
- * receives anything to filter: the endpoint returns one approved page.
+ * Every browse facet is expressed here, because the client receives nothing
+ * to filter locally: the endpoint returns one approved page.
  */
 export class BrowseDressesDto {
   /**
    * DELIBERATELY ACCEPTED AND DELIBERATELY IGNORED.
    *
-   * This endpoint used to take `?status=` and the frontend called it with
-   * `all`, which shipped the entire moderation queue — pending and rejected
-   * listings, with their owners' phone numbers — to every anonymous visitor.
-   * The public list is now approved-only with no way to ask otherwise; the
-   * admin queue lives behind AdminGuard at `GET /api/admin/dresses`.
+   * The public list is approved-only with no way to ask otherwise; the admin
+   * queue lives behind AdminGuard at `GET /api/admin/dresses`.
    *
    * The field stays declared because the global ValidationPipe runs with
    * `forbidNonWhitelisted`, so an undeclared `status` would 400. A cached copy

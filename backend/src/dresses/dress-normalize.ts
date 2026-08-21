@@ -23,10 +23,9 @@ import { DressCategory } from '@prisma/client';
  * The sizes the publish form and the browse filter offer as chips.
  *
  * Mirrors SIZES in frontend/src/lib/data.js. Note what is NOT here: "אחר".
- * That used to be a storable value in its own right — a dress could literally
- * have the size "אחר" — and it is now purely a UI affordance that reveals a
- * free-text field. What gets stored is whatever the lister typed into that
- * field, never the word "אחר" itself.
+ * It is purely a UI affordance that reveals a free-text field — what gets
+ * stored is whatever the lister typed into that field, never the word
+ * "אחר" itself.
  *
  * This list is used for case-folding, not for validation. A size does not
  * have to appear here to be accepted.

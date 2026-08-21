@@ -19,12 +19,11 @@ export const COLOR_SWATCHES = [
    UI (see SIZES in lib/data.js — the two lists are separate on purpose, not a
    duplication).
 
-   "אחר" used to be in this list as a matchable value, because a dress could
-   literally be listed at size "אחר". It is not a value any more: SizeMultiSelect
-   renders it as a chip that reveals a free-text box, and whatever that box
-   produces joins `f.sizes` alongside the letters, matched exactly against the
-   dress's own sizes. That box is also what finally lets someone filter for a
-   numeric size — which this list still deliberately doesn't offer as a chip. */
+"אחר" is not in this list either, and is not a matchable value anywhere:
+   SizeMultiSelect renders it as a chip that reveals a free-text box, and
+   whatever that box produces joins `f.sizes` alongside the letters, matched
+   exactly against the dress's own sizes. That box is also the only way to
+   filter for a numeric size, since this list deliberately offers none. */
 export const LETTER_SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
 
 /* Source filter options: [value, label]. "הכל" (all) is the default. */

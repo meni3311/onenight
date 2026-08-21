@@ -8,8 +8,8 @@ import { CATEGORIES } from '../dress-normalize';
 /**
  * Query for GET /api/admin/dresses — the moderation queue.
  *
- * `status` is the one param the public browse endpoint deliberately no longer
- * honours. It lives here instead, on a controller that carries AdminGuard at
+ * `status` is the one param the public browse endpoint deliberately does not
+ * honour. It lives here instead, on a controller that carries AdminGuard at
  * the class level.
  */
 export class AdminListDressesDto {

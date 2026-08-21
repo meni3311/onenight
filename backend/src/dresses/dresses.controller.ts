@@ -40,13 +40,10 @@ export class DressesController {
    * The public browse list. Approved listings only, one page at a time,
    * filtered and sorted server-side, without owner contact details.
    *
-   * This route used to take `?status=` and the frontend called it with `all`,
-   * so every anonymous visitor's browser downloaded the entire moderation
-   * queue — pending and rejected listings, each carrying its owner's phone
-   * number and email — and then hid all of it client-side. There is now no
-   * parameter that reaches a non-approved listing from here; the queue lives
-   * behind AdminGuard on AdminDressesController. `status` is still accepted
-   * and ignored so a stale client can't 400 — see BrowseDressesDto.
+   * No parameter reaches a non-approved listing from here; the moderation
+   * queue lives behind AdminGuard on AdminDressesController. `status` is
+   * accepted and ignored so a stale client can't 400 — see
+   * BrowseDressesDto.
    */
   @Get()
   @ApiOperation({ summary: 'Browse approved dresses — paginated, filtered, sorted' })
@@ -83,7 +80,7 @@ export class DressesController {
    * "images" would be captured as a dress id.
    */
   @Post('images')
-  @ApiOperation({ summary: 'Upload a listing photo to Supabase Storage' })
+  @ApiOperation({ summary: 'Upload a listing photo to Cloudflare R2' })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file'))
   async uploadImage(

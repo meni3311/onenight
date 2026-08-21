@@ -12,11 +12,8 @@ generator client {
   //
   // Every dress read includes two relations (images, availability — see
   // CLIENT_INCLUDE), so the default strategy costs three round trips where one
-  // would do. That is irrelevant against a local database and dominant against
-  // a distant one: on the old ap-southeast-2 instance a single round trip cost
-  // ~1.8s and endpoint latency tracked the number of queries almost exactly.
-  // The move to an EU region cut the per-trip cost, which makes this less
-  // dramatic but no less correct — one query still beats three.
+  // would do. Negligible against a local database, dominant against a distant
+  // one — and the database is not local.
   //
   // Preview feature in Prisma 5 — `npx prisma generate` must be re-run after
   // changing this line, or the client won't accept the option.
@@ -29,21 +26,16 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// NOTE: the DressCondition / DressSource / DressLength / SleeveLength enums
-// that used to live here were dropped when the dress flow moved off the
-// localStorage mock — those four columns are now plain text holding the
-// Hebrew labels the UI already uses. See the comment above `model Dress`.
-
 /// What occasion a listing is for. DELIBERATELY A REAL ENUM WITH ENGLISH
-/// SLUGS, unlike the four plain-text columns described above.
+/// SLUGS, unlike `condition` / `source` / `dressLength` / `sleeveLength`,
+/// which are plain text holding Hebrew labels (see `model Dress`).
 ///
-/// The reasoning that made those four Hebrew text columns does not apply
-/// here. They are compared directly against Hebrew labels the filter UI
-/// already holds, so an enum would have meant a translation layer on every
-/// read and write. `category` is a different kind of value: a stable,
-/// linkable identity. The homepage's four category tiles link to
+/// Those four are compared directly against Hebrew labels the filter UI
+/// already holds, so an enum would mean a translation layer on every read
+/// and write. `category` is a different kind of value: a stable, linkable
+/// identity. The homepage's four category tiles link to
 /// `?categories=bridal`, and a URL is no place for a Hebrew label that a
-/// copy edit could invalidate. The display strings ("כלה", "שושבינה",
+/// copy edit could invalidate. The display strings ("כלה", "סט שמלות",
 /// "ערב", "מידות גדולות") live in frontend/src/lib/data.js as a
 /// value→label map, so changing what a visitor reads never touches the
 /// database.
@@ -61,11 +53,6 @@ enum DressCategory {
   plus_size
 }
 
-// Mirrors the (now-retired) TypeORM `users` entity field-for-field, so the
-// SQLite → Postgres move is a pure persistence swap with no behaviour change.
-// NOTE: `id` is app-generated (uuid) rather than mirroring auth.users.id from
-// Supabase Auth — the rows migrated out of SQLite already carry their own
-// uuids, and login is email+password via bcrypt, not Supabase Auth.
 model User {
   id       String  @id @default(uuid())
   name     String
@@ -73,8 +60,8 @@ model User {
   phone    String?
   // Deliberately nullable and NOT unique: it's a display-only handle derived
   // from the email local-part (see UsersService.deriveUsername), never used
-  // for login or lookup. One migrated row already has NULL here, and derived
-  // handles can legitimately collide across different email domains.
+  // for login or lookup. Rows can legitimately have none, and derived handles
+  // can collide across different email domains.
   username String?
   city     String?
   password String // bcrypt hash, stored as-is — never re-hashed
@@ -98,17 +85,15 @@ model User {
 //
 // `condition` / `source` / `dressLength` / `sleeveLength` are plain text
 // holding the Hebrew option labels ("כמו חדשה", "תפירה אישית", "ארוך", …)
-// rather than the enums they used to be. That's a deliberate call made when
-// migrating the dress flow off the localStorage mock: the mock stored the
-// Hebrew labels, and every filter/compare in App.jsx matches on them
-// directly, so keeping enums would have meant a translation layer on every
-// read and write. Trade-off: no DB-level constraint on these four columns —
+// rather than enums, deliberately: every filter/compare in the frontend
+// matches on those labels directly, so an enum would mean a translation
+// layer on every read and write. Trade-off: no DB-level constraint on these
+// four columns —
 // the allowed values live in frontend/src/lib/data.js (CONDITIONS,
 // DRESS_LENGTHS, SLEEVE_LENGTHS) and are enforced by the DTO validators in
 // dto/create-dress.dto.ts. Keep those two lists in sync.
 model Dress {
   id          String         @id @default(uuid())
-  // Renamed from `name`/`description` to match the form field names.
   title       String
   desc        String?
   price       Float
@@ -123,8 +108,8 @@ model Dress {
   condition   String
   dressLength  String
   sleeveLength String
-  // Free-text city, distinct from `User.city`. Nullable/optional so existing
-  // listings created before this field don't break.
+  // Free-text city, distinct from `User.city`. Nullable — not every listing
+  // has one.
   city         String?
   // Delivery/pickup region, chosen from data.js REGIONS. Distinct from
   // `city`: region is the coarse filter facet, city is free text.
@@ -135,12 +120,6 @@ model Dress {
   phone        String?
   email        String?
   // Every size this one physical listing fits, e.g. ["S", "M"] or ["38"].
-  //
-  // Replaced a single `size String?` scalar. It also took over the name from
-  // a `sizes DressSize[]` relation that was dropped in the same migration:
-  // that model was dead — nothing in the backend or the frontend ever read
-  // or wrote it, and Booking carries its own `size` column — so it was a
-  // dormant table squatting on the name the real field wanted.
   //
   // NOT constrained to a fixed list, by design. The publish form offers the
   // standard sizes as chips plus an "אחר" (other) option that reveals a
@@ -186,13 +165,10 @@ model Dress {
   @@index([ownerId])
   @@index([dressLength])
   @@index([sleeveLength])
-  // These two existed in the database from
-  // 20260810180000_dress_flow_real_persistence, which created them in raw
-  // SQL, but were never declared here. That drift went unnoticed until a
-  // later `migrate dev` diffed the two and generated a migration to drop
-  // them. Declaring them makes the schema the source of truth and keeps the
-  // indexes: `region` in particular is the facet server-side browse
-  // filtering would key on, and `email` backs listing-ownership lookups.
+  // `region` is a browse filter facet; `email` backs the listing-ownership
+  // lookups (listByOwner, deleteDress). Both must stay declared here — a
+  // `migrate dev` will generate a migration dropping any index the schema
+  // doesn't know about.
   @@index([email])
   @@index([region])
   // Backs the paginated browse query, which is always `WHERE status = ?
@@ -208,14 +184,6 @@ model Dress {
   // on every single one.
   @@index([category])
 }
-
-// NOTE: `model DressSize` used to sit here — a per-dress size row with an
-// `available` flag, left over from a multi-size booking flow that was never
-// built. It was dead in the strictest sense: no query, service, controller
-// or component in either the backend or the frontend referenced it, and
-// Booking has always carried its own `size` column. It was dropped when
-// `Dress.sizes` became a real String[], because the dead relation was
-// holding the name. Nothing was migrated out of it; the table was empty.
 
 // NOTE ON THE PRIMARY/COVER PHOTO: there is no `isPrimary` flag and no
 // `coverImageId` on Dress — the cover is whichever row has the lowest
@@ -292,13 +260,12 @@ model Review {
   sizeWorn String
   createdAt DateTime @default(now())
 
-  // NOTE: the brief asked for these new fields to include a relation field
-  // literally named `reviewer`, but this model already has an (unrelated,
-  // free-text) `reviewer String` column — keeping both under the same name
-  // isn't possible. Since the brief also said not to rename/delete any
-  // existing column, the old `reviewer` string is left untouched and the
-  // new user relation is named `reviewerUser` instead. Flag if you'd
-  // rather retire the free-text field in favor of the relation.
+  // TWO REVIEWER FIELDS, ON PURPOSE — AND ONE IS PROBABLY REDUNDANT.
+  // `reviewer` above is free text; `reviewerUser` below is the real relation.
+  // They coexist only because the relation couldn't take the name the column
+  // already held. Still open: retire the free-text `reviewer` in favour of
+  // the relation. Nothing reads either yet — the Review model has no
+  // controller or service (see the reviews section in ProductPage.jsx).
   reviewerId   String
   reviewerUser User     @relation("reviewer", fields: [reviewerId], references: [id])
   revieweeId   String
@@ -312,20 +279,20 @@ model Review {
 // Logs every click of the dress-detail page's "להזמנה" button (the WhatsApp
 // contact CTA — see ProductPage.jsx's book()), so admin can follow up and
 // check whether a deal closed. Deliberately NOT the same table as `Booking`
-// above: `Booking` is older, unrelated, currently-dormant infrastructure for
-// a full renter/lister request-response workflow (status, 24h SLA) — not a
-// payment schema (checked: no payment/stripe/checkout code or mentions
-// anywhere in this repo's history) — and this feature explicitly has no
-// status/workflow beyond "exists, can be deleted." Keeping them separate
-// avoids overloading Booking's semantics with this simpler logging use case.
+// above: `Booking` is dormant infrastructure for a full renter/lister
+// request-response workflow (status, 24h SLA), while this has no workflow
+// beyond "exists, can be deleted." Keeping them separate avoids overloading
+// Booking's semantics with this simpler logging use case.
 //
 // `renterId` is a genuine relation — this button already requires the
-// renter to be logged in, so there's always a real User row. `dressId` /
-// `dressTitle` / `ownerPhone` are a denormalized snapshot instead of
-// relations, because dresses (and their owners' listing-contact info)
-// currently live only in the frontend's localStorage mock, not in this
-// database — see the note on Dress's lack of a `phone` field. There is no
-// real Dress row for a foreign key to point at.
+// renter to be logged in, so there's always a real User row.
+//
+// `dressId` / `dressTitle` / `ownerPhone` are a denormalized snapshot rather
+// than relations, so that an inquiry outlives the listing it refers to.
+// Deleting a dress deliberately leaves its inquiries behind (see
+// DressesService.deleteDress) so the admin can still follow up on a request
+// made before the owner pulled the ad — a foreign key would either block
+// that delete or cascade the history away.
 model BookingInquiry {
   id          String @id @default(uuid())
 
@@ -340,7 +307,7 @@ model BookingInquiry {
   renter      User?  @relation("bookingInquiries", fields: [renterId], references: [id], onDelete: SetNull)
   renterPhone String // snapshot at click-time, independent of later profile edits
 
-  dressId     String // the mock system's dress id — app already routes to dress detail by this id
+  dressId     String // plain column, not a relation — see the note above
   dressTitle  String
   ownerPhone  String
 
@@ -352,6 +319,40 @@ model BookingInquiry {
   @@index([renterId])
   @@index([dressId])
   @@index([createdAt])
+}
+
+// Messages sent through the "צור קשר" page's form (frontend ContactPage.jsx →
+// POST /api/contact-inquiries), read by the admin panel's "פניות" tab.
+//
+// Deliberately NOT related to `User`, and deliberately not the same table as
+// `BookingInquiry` above:
+//
+//   - No relation, because the form is public. Whoever fills it in may have
+//     no account at all, and the address they typed is unverified — hanging a
+//     foreign key off it would imply an identity this row cannot vouch for.
+//     What's stored is exactly what was submitted, and nothing more.
+//   - Not BookingInquiry, because that row is a log of a click on a specific
+//     listing, carrying a dress snapshot and rental dates. This one has no
+//     dress and no dates; the only thing the two share is that an admin reads
+//     them. Merging them would mean half the columns null on every row.
+//
+// `handled` is the whole workflow, on purpose — see UpdateContactInquiryDto.
+model ContactInquiry {
+  id      String @id @default(uuid())
+  name    String
+  // Stored lowercased (see ContactInquiriesService.create). Not unique: the
+  // same person writing twice is two messages, not a conflict.
+  email   String
+  message String
+  // Admin's "dealt with" flag. Indexed because the natural read is "what's
+  // still open", and the queue is expected to outgrow a single screen long
+  // before anyone prunes it.
+  handled Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([handled])
 }
 
 model Favorite {

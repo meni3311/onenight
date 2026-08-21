@@ -129,7 +129,7 @@ export default function PublishPage({ onSubmit, goHome }) {
             {errors.title && <span className="err">{errors.title}</span>}</div>
 
           {/* Category sits above the description on purpose: choosing
-              "שושבינה" changes what the description is supposed to contain
+              "סט שמלות" changes what the description is supposed to contain
               (see the note below), so the choice has to come first. */}
           <div className="field full"><label>קטגוריה</label>
             <div className="chips">
@@ -165,7 +165,7 @@ export default function PublishPage({ onSubmit, goHome }) {
           {v.category === "bridesmaid" && (
             <div className="field full">
               <div className="notice-box">
-                <p className="notice-box-title">סט שושבינות</p>
+                <p className="notice-box-title">סט שמלות</p>
                 <p className="notice-box-text">
                   נא לפרט בתיאור את השמלות שבסט ואת המידה של כל אחת מהן — כך השוכרת תדע בדיוק מה היא מקבלת.
                 </p>

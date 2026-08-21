@@ -9,12 +9,33 @@ import { CATEGORY_LABELS } from "../../lib/data.js";
    which has the room. */
 const CARD_HASHTAGS = 3;
 
+/* The info block under the photo is pinned to this height so every card in
+   the grid is the same height, whether or not it has hashtags.
+
+   The photo itself is already a fixed aspect-[3/4] box, so it was never the
+   variable part — the text under it was. Two rows there could change height:
+   the size/city line (wraps on a narrow 2-column phone layout) and the
+   hashtag row (absent entirely on a listing with no tags). Both are clamped
+   to a single line below, which makes this height reachable rather than
+   aspirational: min-height + non-wrapping content means the block can't
+   overflow it and can't come up short either.
+
+   Budget: 8 (pt-2) + 14 (size) + 6 + 19 (price) + 7 + 19 (tags) + 8 (pb-2). */
+const CARD_INFO_MIN_HEIGHT = 84;
+
+/* One-line clamp for the two rows that would otherwise vary — see above. */
+const ONE_LINE = {
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
 /* Product card: 3:4 image, hover zoom, glassy favorite toggle and a
    pending-approval flag for account/admin views.
 
    Memoized because this is the highest-count component on screen — one per
-   listing — and it previously re-rendered on every App state change,
-   including each keystroke in the search filter. Its props are now stable:
+   listing — and without it every App state change re-renders all of them,
+   including on each keystroke in the search filter. Its props are stable:
    `onFav`/`onOpen` are useCallback'd in App.jsx and `fav` is a boolean. */
 function ProductCardBase({ d, fav, onFav, onOpen, priority = false }) {
   return (
@@ -59,13 +80,24 @@ function ProductCardBase({ d, fav, onFav, onOpen, priority = false }) {
             the card's own borderRadius: 0 and the brand palette — deliberately
             NOT the glassy rounded treatment of the favourite button and the
             pending flag, which are transient UI states rather than a property
-            of the dress. */}
+            of the dress.
+
+            Positioned bottom-LEFT, inside the image box, and with physical
+            `left`/`bottom` rather than inset-inline properties. Two reasons:
+
+            1. It sits over the photo, so it costs the card no height at all —
+               a card with a badge is exactly as tall as one without, which is
+               what keeps the grid rows aligned (see CARD_INFO_MIN_HEIGHT).
+            2. `insetInlineEnd` resolves to the *left* edge under the app's
+               RTL direction, which is where the favourite button already
+               lives — the two were stacking in the same corner. Physical
+               values here can't drift with direction. */}
         {CATEGORY_LABELS[d.category] && (
           <span
             style={{
               position: "absolute",
-              insetInlineEnd: "12px",
-              top: "12px",
+              left: "12px",
+              bottom: "12px",
               borderRadius: 0,
               background: COLORS.bordeaux,
               color: COLORS.cream,
@@ -88,8 +120,10 @@ function ProductCardBase({ d, fav, onFav, onOpen, priority = false }) {
         )}
       </div>
 
-      {/* Info — flat, editorial, RTL-aware alignment, generous padding */}
-      <div className="px-1 pt-2 pb-2 text-start">
+      {/* Info — flat, editorial, RTL-aware alignment, generous padding.
+          Fixed minimum height so every card in the grid ends at the same
+          baseline; see CARD_INFO_MIN_HEIGHT. */}
+      <div className="px-1 pt-2 pb-2 text-start" style={{ minHeight: `${CARD_INFO_MIN_HEIGHT}px` }}>
         {/* Size — uppercase tracking, muted gray */}
         <p style={{
           fontFamily: FONTS.jost,
@@ -97,6 +131,7 @@ function ProductCardBase({ d, fav, onFav, onOpen, priority = false }) {
           letterSpacing: "0.14em",
           textTransform: "uppercase",
           color: "#999",
+          ...ONE_LINE,
         }}>
           {/* `sizes` is an array now — every size this dress fits, not one.
               Guarded because ProductPage hands the card shape around and a
@@ -128,9 +163,14 @@ function ProductCardBase({ d, fav, onFav, onOpen, priority = false }) {
         </p>
 
         {/* Hashtag chips. Square, hairline-bordered and muted — they sit under
-            the price and must not compete with it. */}
+            the price and must not compete with it.
+
+            `flexWrap: nowrap` + overflow hidden: wrapping would let three
+            long tags take a second line on one card and one on the next,
+            which is what pushes grid rows out of alignment. Anything past the
+            edge is cut — the full set is on the detail page. */}
         {d.hashtags?.length > 0 && (
-          <div style={{ marginTop: "7px", display: "flex", flexWrap: "wrap", gap: "4px" }}>
+          <div style={{ marginTop: "7px", display: "flex", flexWrap: "nowrap", gap: "4px", overflow: "hidden" }}>
             {d.hashtags.slice(0, CARD_HASHTAGS).map((tag) => (
               <span
                 key={tag}
@@ -142,6 +182,8 @@ function ProductCardBase({ d, fav, onFav, onOpen, priority = false }) {
                   border: `1px solid ${COLORS.brandLight}`,
                   borderRadius: 0,
                   padding: "2px 6px",
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
                 }}
               >
                 #{tag}

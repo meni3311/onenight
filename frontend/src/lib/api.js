@@ -1,11 +1,10 @@
 /* ============================================================
    HTTP client for the NestJS backend.
 
-   This file used to be a localStorage-backed mock. It isn't any more:
-   every dress read and write goes to real Postgres (via Prisma) and
-   every photo lives in Supabase Storage. Nothing in the dress flow
-   touches browser storage — that's what made listings invisible from
-   any other browser.
+   Every dress read and write goes to Postgres (via Prisma) and every
+   photo lives in Cloudflare R2. Nothing in the dress flow touches browser
+   storage — a browser-local copy is what makes a listing invisible from
+   every other browser.
 
    Do not reintroduce a local fallback here. A mock that silently takes
    over when the API is down looks like it works and loses data.
@@ -88,17 +87,16 @@ export async function api(path, { method = "GET", body, adminPw } = {}) {
  * `email` or `photos`: the browse response is public, so contact details come
  * only from getDress() when a listing is actually opened.
  *
- * There is no way to ask this for pending or rejected listings. It used to
- * take `?status=all` and this app called it that way, which sent the whole
- * moderation queue to every visitor. The queue is getAdminDresses() now.
+ * There is no way to ask this for pending or rejected listings — the
+ * moderation queue is getAdminDresses(), which is password-gated.
  */
 export function browseDresses(query = "") {
   return api(`/api/dresses${query}`);
 }
 
 /**
- * One listing in full, contact details included. The card in the grid no
- * longer carries `phone`, so the detail view fetches this on open — the
+ * One listing in full, contact details included. The card in the grid
+ * carries no `phone`, so the detail view fetches this on open — the
  * WhatsApp CTA and the booking-inquiry log both need it.
  */
 export function getDress(dressId) {
@@ -107,9 +105,8 @@ export function getDress(dressId) {
 
 /**
  * Approved listings by id, in the order asked for. Backs the favourites page,
- * which holds ids in localStorage and used to resolve them against the full
- * catalogue the browse call returned. Ids that are unknown — or no longer
- * approved — are absent from the response rather than an error.
+ * which holds ids in localStorage. Ids that are unknown — or not approved —
+ * are absent from the response rather than an error.
  */
 export function getDressesByIds(ids) {
   if (!ids.length) return Promise.resolve([]);
@@ -213,6 +210,45 @@ export function aiGenerateDressPhotos(dressId, imageIds, adminPw) {
 }
 
 /**
+ * "צור קשר" form submission. Public and unauthenticated — the sender's email
+ * is whatever they typed, not a verified account, which is why the admin view
+ * of these is a read-only queue rather than anything that can be replied to
+ * in-app.
+ *
+ * `payload` is `{ name, email, message }`. Rejects with ApiError(400) if the
+ * backend's validators disagree with the shape.
+ */
+export function submitContactInquiry(payload) {
+  return api("/api/contact-inquiries", { method: "POST", body: payload });
+}
+
+/** Admin: every contact-form message, newest first. Password-gated. */
+export function getContactInquiries(adminPw) {
+  return api("/api/contact-inquiries", { adminPw });
+}
+
+/**
+ * Admin: flag a message as dealt with (or un-flag it). Resolves with the
+ * updated row, so the caller can replace it in place rather than refetching
+ * the whole list.
+ */
+export function setContactInquiryHandled(id, handled, adminPw) {
+  return api(`/api/contact-inquiries/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    adminPw,
+    body: { handled },
+  });
+}
+
+/** Admin: delete a contact-form message. Resolves with nothing (204). */
+export function deleteContactInquiry(id, adminPw) {
+  return api(`/api/contact-inquiries/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    adminPw,
+  });
+}
+
+/**
  * Sends a 6-digit email OTP. Shared by registration, forgot-password, and
  * account deletion — one code system, keyed only by email, no "purpose"
  * field — so this is the same call AuthContext's own postJson makes for
@@ -234,7 +270,7 @@ export function deleteAccount(email, code) {
 }
 
 /**
- * Upload one listing photo and get back its public Supabase Storage URL.
+ * Upload one listing photo and get back its public Cloudflare R2 URL.
  * Sent as multipart rather than JSON — the bytes never pass through the
  * dress record, only the resulting URL does.
  */

@@ -5,11 +5,10 @@ import { COLORS } from "../../constants/theme.js";
 /* Image with a graceful SVG fallback: on load error it swaps to a tinted
    placeholder generated from the dress color + label.
 
-   `priority` opts an image out of lazy loading. It defaults to false, but
-   loading="lazy" used to be hardcoded here for *every* image — including
-   the first row of dress cards, which is normally the LCP element. Lazy
-   loading those delays the largest paint rather than helping it, so
-   above-the-fold callers pass priority. */
+   `priority` opts an image out of lazy loading, and defaults to false.
+   Above-the-fold callers must pass it: the first row of dress cards holds
+   the LCP element, and lazy-loading that delays the largest paint rather
+   than helping it. */
 export function Img({ src, color, label, className = "", priority = false, ...rest }) {
   const [err, setErr] = useState(false);
   return (

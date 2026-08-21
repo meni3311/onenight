@@ -168,7 +168,7 @@ export function SiteHeader({ go, goAccount }) {
     { label: "דף הבית", action: () => { go("home"); window.scrollTo({ top: 0, behavior: "smooth" }); } },
     { label: "גלריה", action: () => { go("home"); setTimeout(() => document.getElementById("browse")?.scrollIntoView({ behavior: "smooth" }), 60); } },
     { label: "איך זה עובד", action: () => { go("home"); window.scrollTo({ top: 0, behavior: "smooth" }); } },
-    { label: "צור קשר", action: () => { go("home"); window.scrollTo({ top: 0, behavior: "smooth" }); } },
+    { label: "צור קשר", action: () => go("contact") },
   ];
 
   return (

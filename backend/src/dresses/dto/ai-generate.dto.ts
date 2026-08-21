@@ -10,7 +10,7 @@ import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsString } from 'class-validator'
  * guard — each id is a separate metered generation — and sits comfortably
  * above any real listing's photo count.
  *
- * Keep this in step with MAX_PER_RUN in AiImaginePanel.jsx, which pre-empts
+ * Keep this in step with MAX_PER_RUN in AdminPhotosPanel.jsx, which pre-empts
  * the same limit client-side, and with the poll-interval reasoning in
  * AiPhotoService (its rate-limit headroom assumes at most 6 in flight).
  */

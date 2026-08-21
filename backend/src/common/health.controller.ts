@@ -16,7 +16,7 @@ interface HealthOk {
  *
  * Runs a trivial `SELECT 1` against Postgres rather than just returning 200
  * unconditionally — a process that's up but has lost its DB connection
- * (pool exhausted, Supabase project paused, stale credentials after a
+ * (pool exhausted, Neon compute suspended, stale credentials after a
  * redeploy) isn't actually healthy, and catching that before real traffic
  * does is the whole point of a platform health check. PrismaModule is
  * @Global (see prisma.module.ts), so no module wiring was needed beyond

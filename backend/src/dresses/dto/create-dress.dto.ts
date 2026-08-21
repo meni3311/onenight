@@ -137,7 +137,7 @@ export class CreateDressDto {
   @ApiProperty() @IsEmail() email!: string;
 
   /**
-   * Public Supabase Storage URLs produced by POST /dresses/images. `IsUrl`
+   * Public Cloudflare R2 URLs produced by POST /dresses/images. `IsUrl`
    * rejects the base64 data: URLs the old mock used to store, which is the
    * point — image bytes must never come through this endpoint again.
    */

@@ -3,7 +3,7 @@
    Owns routing + shared state; delegates rendering to pages.
    ============================================================ */
 import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
-import { api, browseDresses, getDressesByIds } from "./lib/api.js";
+import { api, browseDresses, getDress, getDressesByIds } from "./lib/api.js";
 import { purgeLegacyDressStorage } from "./lib/data.js";
 import { useLocalStorage } from "./hooks/useLocalStorage.js";
 import { useToast } from "./hooks/useToast.js";
@@ -29,6 +29,7 @@ const AuthPage = lazy(() => import("./pages/AuthPage.jsx"));
 const AccountPage = lazy(() => import("./pages/AccountPage.jsx"));
 const AdminPage = lazy(() => import("./pages/AdminPage.jsx"));
 const TermsPage = lazy(() => import("./pages/TermsPage.jsx"));
+const ContactPage = lazy(() => import("./pages/ContactPage.jsx"));
 
 /* Reuses the existing .empty / .page styling rather than introducing a new
    loading treatment, so a chunk fetch looks like the rest of the app. */
@@ -44,11 +45,21 @@ function RouteFallback() {
    same pattern the admin panel already uses (see README: /#admin). The
    registration form's terms link opens /#terms in a new tab this way,
    rather than needing its own modal-on-modal treatment. */
-const HASH_ROUTES = new Set(["admin", "terms"]);
+const HASH_ROUTES = new Set(["admin", "terms", "contact"]);
 const routeFromHash = () => {
   const h = location.hash.replace("#", "");
   return HASH_ROUTES.has(h) ? h : "home";
 };
+
+/* Deep link to a single listing: /#dress=<id>.
+   This is the link the backend puts in the "your dress was approved" email
+   (see MailService / DressesService.updateStatus), so it has to survive
+   being opened cold in a new tab from an inbox — no app state, no prior
+   navigation. It isn't a HASH_ROUTE because it doesn't select a route: the
+   dress page is an overlay App renders on top of whatever route is showing,
+   so this resolves to the homepage with a listing open, exactly as if the
+   card had been clicked. Unknown ids fall through to a toast. */
+const DRESS_HASH_RE = /^#dress=(.+)$/;
 
 /* Bridges AccountPage (legacy phone/password-shaped `user`) onto the live
    OTP session from AuthContext, since AccountPage is otherwise only ever
@@ -118,11 +129,10 @@ const FILTER_DEBOUNCE_MS = 250;
 
 export default function App() {
   const [route, setRoute] = useState(routeFromHash);
-  /* One page of approved listings — NOT the catalogue. This used to be every
-     dress in the database at every status, fetched once with `?status=all`
-     and narrowed in the browser; anything that needs a different slice
-     (the owner's own listings, the moderation queue, favourites) now asks
-     for that slice itself rather than filtering this array. */
+  /* One page of approved listings — NOT the catalogue. Anything that needs a
+     different slice (the owner's own listings, the moderation queue,
+     favourites) asks for that slice itself rather than filtering this
+     array. */
   const [dresses, setDresses] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -225,6 +235,26 @@ export default function App() {
     return () => window.removeEventListener("hashchange", h);
   }, []);
 
+  /* Resolve /#dress=<id> into an open listing — see DRESS_HASH_RE. Runs on
+     mount (the cold-from-an-email case) and on hashchange, so pasting the
+     link into the address bar of an already-open tab works too. The fetch is
+     getDress rather than a lookup in `dresses`: that array is one page of
+     approved listings and the linked dress may well not be on it. */
+  useEffect(() => {
+    const openFromHash = () => {
+      const m = DRESS_HASH_RE.exec(location.hash);
+      if (!m) return;
+      const id = decodeURIComponent(m[1]);
+      getDress(id)
+        .then((full) => { if (full) setSelected(full); })
+        .catch(() => toast("השמלה המבוקשת לא נמצאה"));
+    };
+    openFromHash();
+    window.addEventListener("hashchange", openFromHash);
+    return () => window.removeEventListener("hashchange", openFromHash);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /* Hide the viewport scrollbar on the homepage only (see the
      .hide-viewport-scrollbar rules in styles.css). The class goes on
      <html> rather than a wrapper div because the homepage has no scroll
@@ -249,7 +279,16 @@ export default function App() {
   const go = useCallback((r) => {
     setRoute(r);
     window.scrollTo({ top: 0 });
-    if (!HASH_ROUTES.has(r) && location.hash) history.replaceState(null, "", location.pathname);
+    /* Keep the URL honest about where we are: the hash follows the route in
+       both directions, so /#dress=abc can't sit in the address bar while the
+       contact page is on screen and a reload lands where you actually are.
+       replaceState does not fire `hashchange`, so this can't feed back into
+       the listener above. */
+    if (HASH_ROUTES.has(r)) {
+      if (location.hash !== `#${r}`) history.replaceState(null, "", `#${r}`);
+    } else if (location.hash) {
+      history.replaceState(null, "", location.pathname);
+    }
   }, []);
 
   const onAuth = (u) => { setUser(u); setRoute("account"); toast("ברוכה הבאה, " + u.name + " 🌸"); };
@@ -275,10 +314,9 @@ export default function App() {
     }
   };
 
-  /* Favourites are ids in localStorage, and they used to be resolved against
-     the in-memory catalogue. With only one page of listings in the browser
-     that lookup would silently drop every favourite that wasn't on it, so the
-     ids are sent to the server instead. Fetched on entering the page rather
+  /* Favourites are ids in localStorage, resolved server-side: only one page
+     of listings is in the browser, so a local lookup would silently drop
+     every favourite that wasn't on it. Fetched on entering the page rather
      than on every heart click: `favIds` changes as the user toggles hearts in
      the grid, and refetching there would be a request per click for a list
      nothing is currently showing. */
@@ -334,6 +372,7 @@ export default function App() {
         {route === "publish" && <PublishRoute onSubmit={publish} goHome={() => go("home")} />}
         {route === "thankyou" && <ThankYou goHome={() => go("home")} />}
         {route === "terms" && <TermsPage goHome={() => go("home")} />}
+        {route === "contact" && <ContactPage goHome={() => go("home")} />}
 
         {route === "favorites" && (
           <FavoritesPage
@@ -350,8 +389,7 @@ export default function App() {
           <AuthPage mode={authMode} onAuth={onAuth} goHome={() => go("home")} toast={toast} />
         )}
 
-        {/* Neither of these is handed the browse list any more. Both need
-            listings the public list deliberately no longer contains — the
+        {/* Both need listings the public list deliberately excludes — the
             owner's pending/rejected ones, and the whole moderation queue —
             so each fetches its own from an endpoint scoped to it. */}
         {route === "account" && (
@@ -379,8 +417,7 @@ export default function App() {
       {/* `d` is the card that was clicked — enough to paint the page
           immediately. ProductPage fetches the rest itself: the owner's phone
           (stripped from the public list, and needed by the WhatsApp CTA) and
-          the "you may also like" rail, which used to be filtered out of the
-          full catalogue here and now comes from /api/dresses/:id/similar. */}
+          the "you may also like" rail from /api/dresses/:id/similar. */}
       {selected && (
         <ProductPage
           d={selected}

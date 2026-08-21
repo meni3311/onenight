@@ -7,7 +7,7 @@ import { CATEGORY_LABELS } from "../lib/data.js";
 
 /* ============================================================================
    ProductPage — full dedicated dress page (mobile-first, RTL).
-   Replaces the old DetailModal popup entirely. Rent-the-Runway × SSENSE feel:
+   Rent-the-Runway × SSENSE feel:
    full-bleed gallery, editorial identity block, size + date selection,
    accordion details, reviews rail, similar dresses, sticky booking CTA.
 
@@ -22,10 +22,8 @@ import { CATEGORY_LABELS } from "../lib/data.js";
      toast(msg)     — transient toast
      onOpenSimilar  — (optional) open another dress
 
-   The "you may also like" rail used to arrive as a `similar` prop, filtered
-   by App out of the full catalogue it held in memory. That catalogue is gone,
-   so the rail comes from /api/dresses/:id/similar — an endpoint that already
-   existed and had never been called.
+   The "you may also like" rail comes from /api/dresses/:id/similar, fetched
+   here rather than passed in.
 ============================================================================ */
 
 /* ---- design tokens straight from the brief ---- */
@@ -40,6 +38,14 @@ const C = {
   white: "#FFFFFF",
   green: "#4CAF50",
   disabled: "#CCCCCC",
+  /* Site palette, used by the gallery chrome only. A white glyph vanishes
+     against a pale dress photo, and most of this catalogue is pale. Bordeaux
+     is the brand's own ink
+     (COLORS.bordeaux in constants/theme.js, the navbar's icon colour) and
+     reads against both light and dark photography through the frosted glass
+     behind it. The rest of this page's fuchsia system is untouched. */
+  bordeaux: "#6B2D2D",
+  bordeauxDeep: "#5A2424",
 };
 const SERIF = "'Cormorant Garamond','Frank Ruhl Libre',serif";
 const UI = "'Jost','Assistant',system-ui,sans-serif";
@@ -110,10 +116,50 @@ function Gallery({ images, color, label, fav, onFav, onBack }) {
       </button>
 
       <button type="button" className="op-glass op-glass-fav" aria-label={fav ? "הסרה ממועדפים" : "הוספה למועדפים"} aria-pressed={fav} onClick={onFav}>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill={fav ? C.fuchsia : "none"} stroke={fav ? C.fuchsia : "#fff"} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        {/* `currentColor` for both fill and stroke so the one bordeaux tone on
+            .op-glass drives the whole glyph — favourited fills it in, not
+            recolours it. Hover/active shading then applies to both halves
+            automatically instead of needing a second hardcoded hex here. */}
+        <svg width="20" height="20" viewBox="0 0 24 24" fill={fav ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
           <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
         </svg>
       </button>
+
+      {/* Prev / next, one on each side of the photo. The gallery has always
+          been swipeable (see onTouchStart above) but that gesture doesn't
+          exist on a desktop pointer, so the dots were the only way through
+          the images there — and a 7px dot is a poor click target. Rendered
+          only when there is more than one photo; with a single image there is
+          nothing to step through and an arrow would be a dead control.
+
+          `go()` already wraps modulo n, so the last image steps to the first
+          and there are no disabled end states to style. */}
+      {n > 1 && (
+        <>
+          <button
+            type="button"
+            className="op-arrow op-arrow-prev"
+            aria-label="התמונה הקודמת"
+            onClick={() => go(idx - 1)}
+          >
+            {/* RTL gallery: "previous" moves toward the start of the strip,
+                which sits on the right — so the previous arrow points right. */}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="op-arrow op-arrow-next"
+            aria-label="התמונה הבאה"
+            onClick={() => go(idx + 1)}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 6l-6 6 6 6" />
+            </svg>
+          </button>
+        </>
+      )}
 
       {n > 1 && (
         <div className="op-dots">
@@ -223,9 +269,7 @@ export default function ProductPage({ d: summary, fav, onFav, onClose, toast, on
      hidden body scroll at the viewport edge (fixed positioning can't hide
      browser-chrome scrollbars), which read as a stray grey scrollbar on
      the left. useBodyScrollLock is the same hook the auth modal and mobile
-     nav already use — this mirrors what the old DetailModal this page
-     "replaces entirely" (see file header) used to do, which the migration
-     dropped. */
+     nav already use. */
   useBodyScrollLock(true);
 
   useEffect(() => { window.scrollTo?.({ top: 0 }); }, [summary?.id]);
@@ -641,12 +685,46 @@ const CSS = `
 /* SECTION 1 — gallery */
 .op-gallery{position:relative;width:100%;height:75vh;overflow:hidden;background:${C.cream};}
 .op-gallery-img{width:100%;height:100%;object-fit:cover;object-position:top center;display:block;}
+/* Back + favourite. Bordeaux glyphs, not white.
+
+   White was invisible: at 0.15 opacity the frosted pane barely lifts the
+   photo behind it, so a white icon over a pale dress on a pale backdrop —
+   which is most of this catalogue — had nothing to sit against. Bordeaux is
+   dark enough to hold on its own, and the pane is taken to 0.55 so it reads
+   as a proper frosted chip rather than a tint, giving the glyph a consistent
+   light ground whatever the photo underneath is doing.
+
+   Hover/active shade the glyph rather than only scaling it, so the state is
+   legible without motion (and for anyone on prefers-reduced-motion). */
 .op-glass{position:absolute;top:16px;width:44px;height:44px;border-radius:50%;
-  display:flex;align-items:center;justify-content:center;color:#fff;cursor:pointer;
-  background:rgba(255,255,255,0.15);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  border:1px solid rgba(255,255,255,0.2);box-shadow:0 4px 16px rgba(0,0,0,0.08);
-  transition:transform .2s ease;}
-.op-glass:hover{transform:scale(1.06);}
+  display:flex;align-items:center;justify-content:center;color:${C.bordeaux};cursor:pointer;
+  background:rgba(255,255,255,0.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border:1px solid rgba(107,45,45,0.18);box-shadow:0 4px 16px rgba(0,0,0,0.08);
+  transition:transform .2s ease,background .2s ease,color .2s ease;}
+.op-glass:hover{transform:scale(1.06);background:rgba(255,255,255,0.75);color:${C.bordeauxDeep};}
+.op-glass:active{transform:scale(0.96);background:rgba(255,255,255,0.88);color:${C.bordeauxDeep};}
+.op-glass:focus-visible{outline:2px solid ${C.bordeaux};outline-offset:2px;}
+
+/* Gallery prev/next. Same frosted-glass family as the two buttons above and
+   deliberately square — border-radius:0 is the language of the cards, the
+   category badges and the site's chrome generally; the round back/favourite
+   chips are the exception, not the rule. Taller than wide so the hit area
+   follows the edge of a portrait photo. */
+.op-arrow{position:absolute;top:50%;transform:translateY(-50%);
+  width:40px;height:64px;border-radius:0;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  color:${C.bordeaux};cursor:pointer;
+  background:rgba(255,255,255,0.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border:1px solid rgba(107,45,45,0.18);box-shadow:0 4px 16px rgba(0,0,0,0.08);
+  transition:background .2s ease,color .2s ease;}
+.op-arrow:hover{background:rgba(255,255,255,0.78);color:${C.bordeauxDeep};}
+.op-arrow:active{background:rgba(255,255,255,0.9);color:${C.bordeauxDeep};}
+.op-arrow:focus-visible{outline:2px solid ${C.bordeaux};outline-offset:2px;}
+/* Physical left/right, matching .op-glass-back / .op-glass-fav above — these
+   must not flip with the page's dir=rtl. Previous sits on the right because
+   in an RTL strip the earlier image is the one to the right. */
+.op-arrow-prev{right:16px;}
+.op-arrow-next{left:16px;}
 /* Swapped: back sits top-right, favourite top-left. These are physical
    left/right (not inset-inline) so they don't flip with the page's RTL
    direction — changing the values here is the whole swap, and both buttons
@@ -697,6 +775,10 @@ const CSS = `
   .op-glass{top:20px;}
   .op-glass-back{right:20px;}
   .op-glass-fav{left:20px;}
+  /* Same reasoning for the arrows: .op-gallery shrink-wraps the photo on
+     desktop, so an inset from the section edge IS an inset from the image. */
+  .op-arrow-prev{right:20px;}
+  .op-arrow-next{left:20px;}
 }
 
 /* shared section shell */

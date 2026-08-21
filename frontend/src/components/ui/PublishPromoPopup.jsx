@@ -26,12 +26,11 @@ export function PublishPromoPopup() {
   const [dismissedAt, setDismissedAt] = useLocalStorage("onenight_publish_promo_dismissed_at", 0);
   const [visible, setVisible] = useState(false);
 
-  /* "Does this account already have a listing" used to be answered by
-     scanning the browse array, which held every dress at every status. The
-     browse list is one page of approved listings now, so that scan would
-     miss anyone whose only listing is still pending — exactly the person who
-     least needs to be nagged into publishing — and anyone whose listing sits
-     on a later page. Asked of the owner endpoint instead.
+  /* "Does this account already have a listing" is asked of the owner
+     endpoint, not derived from the browse list — that list is one page of
+     approved listings, so it would miss anyone whose only listing is still
+     pending (exactly the person who least needs nagging into publishing) or
+     sits on a later page.
 
      Starts null (unknown) rather than false so the popup can't fire during
      the round trip; the timer below waits for a definite answer. */

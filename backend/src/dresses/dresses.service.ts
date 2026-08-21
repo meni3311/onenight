@@ -24,22 +24,23 @@ import {
 } from './dto/browse-dresses.dto';
 import { AiPhotoError, AiPhotoService } from './ai-photo.service';
 import { StorageService } from './storage.service';
+import { MailService } from '../common/mail.service';
+import { approvedMail, rejectedMail } from './dress-status-mail';
 
 /**
- * The dress object the frontend consumes. Field-for-field what the old
- * localStorage mock returned (frontend/src/lib/api.js), so App.jsx,
- * AccountPage and AdminPage needed no reshaping when the mock was removed:
- *   - `images` is a flat array of public URLs, not DressImage rows
- *   - `booked` is a flat array of "YYYY-MM-DD" strings, not availability rows
- *   - `createdAt` is epoch millis, because App.jsx sorts on it numerically
+ * Whether the lister was actually emailed about a moderation decision.
  *
- * `photos` is the one addition to that shape. It carries the same images in
- * the same order, but with their row ids and `isAiGenerated` flags — the admin
- * AI photo grid needs to address individual images by id, which flat URLs
- * can't express. `images` is deliberately kept alongside it rather than
- * replaced: every browse/detail consumer (App.jsx, the cards, ProductPage)
- * reads `images[0]` and iterates `images`, and none of them care about ids.
+ * Attached to the response of PATCH /dresses/:id/status ONLY — every other
+ * endpoint returns a ClientDress without it, which is why the field is
+ * optional. It exists so the admin panel can stop claiming an email was sent
+ * regardless of what happened; the toast now reflects the send, and a failure
+ * names itself on screen instead of only in the server log.
  */
+export interface StatusNotification {
+  emailSent: boolean;
+  /** Human-readable Hebrew reason, present only when `emailSent` is false. */
+  emailError?: string;
+}
 
 /** One listing photo, with the identity the admin grid needs. */
 export interface ClientDressPhoto {
@@ -48,6 +49,19 @@ export interface ClientDressPhoto {
   isAiGenerated: boolean;
 }
 
+/**
+ * The dress object the frontend consumes. Flattened for the client rather
+ * than mirroring the row shape:
+ *   - `images` is a flat array of public URLs, not DressImage rows
+ *   - `booked` is a flat array of "YYYY-MM-DD" strings, not availability rows
+ *   - `createdAt` is epoch millis, because the frontend sorts on it numerically
+ *
+ * `photos` carries the same images in the same order, but with their row ids
+ * and `isAiGenerated` flags — the admin AI photo grid addresses individual
+ * images by id, which flat URLs can't express. `images` is deliberately kept
+ * alongside it rather than replaced: every browse/detail consumer reads
+ * `images[0]` and iterates `images`, and none of them care about ids.
+ */
 export interface ClientDress {
   id: string;
   title: string;
@@ -64,7 +78,7 @@ export interface ClientDress {
   sleeveLength: string;
   city: string | null;
   region: string | null;
-  /** Replaced the single `size` string; always at least one entry. */
+  /** Always at least one entry. */
   sizes: string[];
   category: DressCategory;
   /** Non-null only when `category` is "bridesmaid". */
@@ -79,22 +93,28 @@ export interface ClientDress {
   images: string[];
   photos: ClientDressPhoto[];
   booked: string[];
+  /**
+   * Set only by updateStatus, and only when a decision actually notified (or
+   * tried to notify) the lister. Absent everywhere else — see
+   * StatusNotification.
+   */
+  notification?: StatusNotification;
 }
 
 /**
  * What an anonymous browser is allowed to see.
  *
- * `phone` and `email` are the listing owner's real contact details, and they
- * were previously included on every card in the browse response — one fetch
- * handed any visitor the phone number of every person who had ever listed a
- * dress. They are dropped here and served only from the single-listing
- * endpoint, which the detail view fetches when a card is actually opened.
+ * `phone` and `email` are the listing owner's real contact details. Dropping
+ * them here is what keeps the browse response from handing every visitor the
+ * phone number of every person who has listed a dress; they are served only
+ * from the single-listing endpoint, which the detail view fetches when a card
+ * is actually opened.
  *
  * `photos` goes too: image row ids and `isAiGenerated` exist for the admin
  * photo grid, and nothing public reads them (every browse consumer reads the
  * flat `images` array — see the note on ClientDress).
  */
-export type PublicDress = Omit<ClientDress, 'phone' | 'email' | 'photos'>;
+export type PublicDress = Omit<ClientDress, 'phone' | 'email' | 'photos' | 'notification'>;
 
 /** One page of results, plus what the caller needs to request the next. */
 export interface Page<T> {
@@ -125,10 +145,8 @@ type DressWithRelations = Prisma.DressGetPayload<{ include: typeof CLIENT_INCLUD
  * instead of Prisma's default of one follow-up query per relation.
  *
  * Every dress read includes two relations, so the default costs three round
- * trips where one does. Against a local database that's free; against the
- * Supabase instance in ap-southeast-2 a single round trip measured ~1.8s, and
- * endpoint latency tracked query count almost exactly — the browse list at
- * ~4.7s was three tolls, not one slow query.
+ * trips where one does. Free against a local database, dominant against a
+ * distant one — and the database is not local.
  *
  * Reads only. `relationLoadStrategy` is not accepted on create/update, so the
  * write paths below keep the default and pay the extra trips on a response
@@ -197,17 +215,17 @@ export class DressesService {
     private readonly prisma: PrismaService,
     private readonly aiPhoto: AiPhotoService,
     private readonly storage: StorageService,
+    /* Provided by the global MailModule (see app.module.ts) — no import
+       needed in DressesModule, same as PrismaService. */
+    private readonly mail: MailService,
   ) {}
 
   /**
    * The one cached read in this service: leading pages of the unfiltered
    * anonymous browse list, keyed by sort and page (see browseCacheKey).
    *
-   * It was a single field back when the list was the entire catalogue and
-   * there was exactly one thing to cache. Paging means one entry per page, so
-   * it is a Map now — still a plain Map rather than a cache library, because
-   * the key space is capped at a handful of entries and the invalidation
-   * below is hand-written either way.
+   * A plain Map rather than a cache library: the key space is capped at a
+   * handful of entries and the invalidation below is hand-written either way.
    *
    * This is per-process. If the API is ever scaled past one instance each
    * one keeps its own copy and a write on instance A won't clear instance
@@ -260,7 +278,7 @@ export class DressesService {
   }
 
   /**
-   * Every filter the homepage used to apply in the browser, as one WHERE.
+   * Every browse facet, as one WHERE.
    *
    * `status` is pinned to "approved" here and is not overridable by anything
    * the caller sends — that is the whole point of this method existing. The
@@ -271,10 +289,10 @@ export class DressesService {
     const where: Prisma.DressWhereInput = { status: 'approved' };
 
     if (q.colors?.length) where.color = { in: q.colors };
-    // `hasSome`, not `in`: `sizes` is an array column now, and a dress that
-    // fits both S and M has to appear in a search for either. `in` would be a
-    // type error here, but the intent is worth stating — ANY overlap matches,
-    // not "all the selected sizes".
+    // `hasSome`, not `in`: `sizes` is an array column, and a dress that fits
+    // both S and M has to appear in a search for either. `in` would be a type
+    // error here, but the intent is worth stating — ANY overlap matches, not
+    // "all the selected sizes".
     if (q.sizes?.length) where.sizes = { hasSome: q.sizes };
     if (q.categories?.length) where.category = { in: q.categories };
     if (q.regions?.length) where.region = { in: q.regions };
@@ -289,9 +307,6 @@ export class DressesService {
     if (price.gte !== undefined || price.lte !== undefined) where.price = price;
 
     if (q.q) {
-      // The client-side version concatenated these four fields and searched
-      // the result, which also matched strings spanning a field boundary.
-      // That was incidental; per-field OR is the intended behaviour.
       const contains = { contains: q.q, mode: Prisma.QueryMode.insensitive };
       where.OR = [
         { title: contains },
@@ -323,8 +338,7 @@ export class DressesService {
    * could swap between two page requests and be shown twice or not at all.
    * The tiebreak makes the sequence total, which is what makes paging stable.
    *
-   * No sort selected is newest-first, matching the order the unpaginated
-   * endpoint happened to return and the frontend treated as its default.
+   * No sort selected is newest-first — the frontend's default.
    */
   private browseOrderBy(sort?: SortKey): Prisma.DressOrderByWithRelationInput[] {
     switch (sort) {
@@ -378,9 +392,8 @@ export class DressesService {
    * The public browse list: one page of approved listings, filtered and
    * sorted server-side, with owner contact details stripped.
    *
-   * There is no way to ask this for a pending or rejected listing. The
-   * endpoint it backs used to take a `status` param that the frontend called
-   * with "all", so every anonymous visitor downloaded the moderation queue.
+   * There is no way to ask this for a pending or rejected listing — the
+   * moderation queue is listForAdmin, behind AdminGuard.
    */
   async listPublic(query: BrowseDressesDto): Promise<Page<PublicDress>> {
     const page = query.page ?? 1;
@@ -429,14 +442,14 @@ export class DressesService {
   }
 
   /**
-   * Approved listings by id, for the favourites page.
+   * Approved listings by id, for the favourites page (which holds ids in the
+   * visitor's localStorage).
    *
-   * Favourites are ids in the visitor's localStorage, and the page used to
-   * resolve them against the full in-memory catalogue. Approved-only is not
-   * just a copy of the browse rule here: a favourited listing that was later
-   * rejected would otherwise still render, which leaks a moderation decision
-   * to whoever favourited it. Unknown and non-approved ids are simply absent
-   * from the response, and the page renders what came back.
+   * Approved-only is not just a copy of the browse rule: a favourited listing
+   * that was later rejected would otherwise still render, which leaks a
+   * moderation decision to whoever favourited it. Unknown and non-approved
+   * ids are simply absent from the response, and the page renders what came
+   * back.
    */
   async listPublicByIds(ids: string[]): Promise<PublicDress[]> {
     if (!ids.length) return [];
@@ -458,9 +471,7 @@ export class DressesService {
    * uses and for the same reason — this app has no bearer token, so there is
    * nothing stronger available without introducing real sessions. Anyone who
    * knows an address can read that person's listings and their own phone
-   * number back. That is narrower than what shipped before (the browse list
-   * handed every visitor every owner's details unprompted) but it is not
-   * privacy, and it goes away when real auth lands.
+   * number back. This is not privacy; it goes away when real auth lands.
    *
    * Unpaginated: this is one person's listings, and the account screen shows
    * them as a single list with no pager. The cap is a bound on a pathological
@@ -555,8 +566,7 @@ export class DressesService {
   /**
    * Create a listing. The owner is resolved from `email` rather than trusted
    * from the body, so a client can't attach a listing to another account.
-   * Status always starts "pending" (schema default) — the approval flow is
-   * unchanged.
+   * Status always starts "pending" (schema default).
    */
   async createDress(dto: CreateDressDto): Promise<ClientDress> {
     const email = dto.email.trim().toLowerCase();
@@ -677,9 +687,34 @@ export class DressesService {
     return this.toClient(updated);
   }
 
-  /** Admin approve/reject. Clears the reason whenever status isn't "rejected". */
+  /**
+   * Admin approve/reject. Clears the reason whenever status isn't "rejected",
+   * and emails the lister about the decision.
+   *
+   * Three deliberate choices in the notification half:
+   *
+   *   - The send is awaited, not fire-and-forget. It costs one HTTP round
+   *     trip on an action an admin performs a handful of times a day, and in
+   *     exchange the response can tell them whether it worked — a detached
+   *     send fails invisibly.
+   *   - It cannot fail the request. MailService returns a result instead of
+   *     throwing (see the note there): the status change has already
+   *     committed, and reporting "approval failed" because an email bounced
+   *     would be a lie that also invites a retry which changes nothing.
+   *   - Only real transitions notify. Re-saving an already-approved listing,
+   *     or moving one back to `pending`, sends nothing — an admin correcting
+   *     a mis-click shouldn't mail the lister twice.
+   */
   async updateStatus(id: string, dto: UpdateDressStatusDto): Promise<ClientDress> {
-    await this.assertDressExists(id);
+    /* Reads the previous status rather than just asserting existence, because
+       "did this actually change?" is what decides whether anyone is emailed.
+       Same 404 as assertDressExists for a missing id. */
+    const before = await this.prisma.dress.findUnique({
+      where: { id },
+      select: { status: true },
+    });
+    if (!before) throw new NotFoundException('שמלה לא נמצאה');
+
     const updated = await this.prisma.dress.update({
       where: { id },
       data: {
@@ -689,7 +724,58 @@ export class DressesService {
       include: CLIENT_INCLUDE,
     });
     this.invalidateBrowseCache();
-    return this.toClient(updated);
+
+    const client = this.toClient(updated);
+    const notification = await this.notifyStatusDecision(before.status, client);
+    return notification ? { ...client, notification } : client;
+  }
+
+  /**
+   * Send the lister the "approved" / "rejected" email, if this was a real
+   * transition into one of those states.
+   *
+   * Returns what happened so the admin panel can say so, or `undefined` when
+   * this decision doesn't notify anybody. Never throws — see updateStatus.
+   */
+  private async notifyStatusDecision(
+    previousStatus: string,
+    dress: ClientDress,
+  ): Promise<StatusNotification | undefined> {
+    const status = dress.status;
+    if (status !== 'approved' && status !== 'rejected') return undefined;
+    if (status === previousStatus) return undefined;
+
+    /* `email` is nullable on Dress. A listing without one has nobody to
+       reach — a data problem worth naming in the log rather than a send to
+       attempt. */
+    if (!dress.email) {
+      this.logger.error(
+        `Dress ${dress.id} moved to "${status}" but carries no email on the listing — nobody was notified.`,
+      );
+      return { emailSent: false, emailError: 'למודעה אין כתובת אימייל — לא נשלחה הודעה' };
+    }
+
+    const message =
+      status === 'approved'
+        ? approvedMail(dress.email, { id: dress.id, title: dress.title })
+        : rejectedMail(dress.email, {
+            id: dress.id,
+            title: dress.title,
+            rejectReason: dress.rejectReason,
+          });
+
+    const result = await this.mail.send(message);
+    if (result.sent) {
+      this.logger.log(`Dress ${dress.id} → ${status}: notified ${dress.email}`);
+      return { emailSent: true };
+    }
+    /* MailService has already logged the specific cause (missing key, 403 on
+       an unverified From domain, network unreachable). This line ties that
+       cause to the listing it belonged to. */
+    this.logger.error(
+      `Dress ${dress.id} → ${status}: the lister was NOT notified (${result.error ?? 'unknown error'}).`,
+    );
+    return { emailSent: false, emailError: result.error };
   }
 
   /**
@@ -775,7 +861,14 @@ export class DressesService {
     const results: AiGenerationResult[] = await Promise.all(
       sources.map(async (src): Promise<AiGenerationResult> => {
         try {
-          const generatedUrl = await this.aiPhoto.generateModelPhoto(src.url);
+          /* `dressId` selects the pose and the diffusion seed — see
+             AiPhotoService.directionFor. Passing it means the same dress keeps
+             a consistent look across regenerations while different dresses get
+             genuinely different starting noise. */
+          const generatedUrl = await this.aiPhoto.generateModelPhoto(
+            src.url,
+            dressId,
+          );
           // The provider's CDN URL expires — persist our own copy before it is
           // ever written to the database.
           const storedUrl = await this.storage.uploadFromUrl(generatedUrl, dressId);
@@ -882,8 +975,6 @@ export class DressesService {
    *
    * Everything else hangs off `Dress` with onDelete: Cascade (images,
    * availability, bookings, reviews, favourites) and goes with the row.
-   * `sizes` used to be in that list back when it was a DressSize relation;
-   * it is a String[] column on the row itself now, so it needs no cascade.
    */
   async deleteDress(id: string, requesterEmail: string): Promise<void> {
     const dress = await this.prisma.dress.findUnique({
@@ -1013,10 +1104,7 @@ export class DressesService {
    *
    * Public, so it returns the stripped shape — this feeds the detail view's
    * "you may also like" rail, which renders cards and reads no contact
-   * details. The rail used to be filled client-side from the full catalogue
-   * the browse call returned; with that catalogue no longer in the browser,
-   * this endpoint (which already existed and was never called) is what backs
-   * it.
+   * details.
    */
   async getSimilarDresses(id: string, limit = 4): Promise<PublicDress[]> {
     const current = await this.prisma.dress.findUnique({

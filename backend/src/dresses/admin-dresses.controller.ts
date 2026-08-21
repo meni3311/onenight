@@ -35,13 +35,11 @@ export class AdminDressesController {
 
   /**
    * The moderation queue — the only way to reach pending and rejected
-   * listings, and the replacement for `GET /api/dresses?status=all`.
+   * listings.
    *
-   * That parameter is gone from the public controller: the admin screen was
-   * reading its queue out of the same unauthenticated response every visitor
-   * got, so the password gated whether the queue was *rendered*, not whether
-   * it was *sent*. AdminGuard is declared at the class level here, so this
-   * route is gated by construction.
+   * AdminGuard is declared at the class level here, so this route is gated
+   * by construction: the password decides whether the queue is *sent*, not
+   * merely whether it is rendered.
    *
    * Returns full ClientDress objects, contact details included — reaching the
    * lister is what the queue is for (the screen renders their phone and links

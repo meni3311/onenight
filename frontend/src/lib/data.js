@@ -6,10 +6,10 @@ export const REGIONS = ["צפון","חיפה והכרמל","מרכז","גוש ד
 /* The sizes the publish form offers as chips. Mirrors STANDARD_SIZES in
    backend/src/dresses/dress-normalize.ts — keep the two in sync.
 
-   NOTE WHAT IS NO LONGER HERE: "אחר". It used to be a storable value, so a
-   dress could literally be listed at size "אחר", which told a renter nothing.
-   It is a UI affordance now — selecting it reveals a free-text field, and what
-   gets stored is whatever was typed there. See SizeMultiSelect.jsx. */
+   "אחר" is deliberately NOT in this list. It is a UI affordance, never a
+   storable value — a dress listed at size "אחר" would tell a renter nothing.
+   Selecting it reveals a free-text field, and what gets stored is whatever
+   was typed there. See SizeMultiSelect.jsx. */
 export const SIZES = ["XS","S","M","L","XL","XXL","34","36","38","40","42","44","46","48","50","52"];
 
 /* Label for the chip that reveals the free-text size field. Never a value. */
@@ -24,7 +24,12 @@ export const OTHER_SIZE = "אחר";
    the DressCategory enum in backend/prisma/schema.prisma. */
 export const CATEGORIES = [
   { value: "bridal",     label: "כלה" },
-  { value: "bridesmaid", label: "שושבינה" },
+  /* The stored enum member is still `bridesmaid` — only the label changed
+     (was "שושבינה"). Nothing keyed on the value moves: browse URLs stay
+     ?categories=bridesmaid, the DressCategory enum in Postgres is untouched,
+     and every `d.category === "bridesmaid"` branch keeps working. This split
+     is exactly what it's for. */
+  { value: "bridesmaid", label: "סט שמלות" },
   { value: "evening",    label: "ערב" },
   { value: "plus_size",  label: "מידות גדולות" },
 ];
@@ -36,9 +41,8 @@ export const CATEGORY_LABELS = Object.fromEntries(
 );
 
 export const CONDITIONS = ["חדשה","כמו חדשה","טובה מאוד","טובה","סבירה"];
-/* Structured filter categories: dress length + sleeve length. The old
-   free-form `LENGTHS`/`length` field that used to duplicate `DRESS_LENGTHS`
-   has been removed — this is now the single source of truth. */
+/* Structured filter categories: dress length + sleeve length. Single source
+   of truth for both facets. */
 export const DRESS_LENGTHS = ["קצר","אמצע","ארוך"];
 export const SLEEVE_LENGTHS = ["קצר","אמצע","ארוך"];
 
@@ -55,22 +59,14 @@ export function placeholder(color, label){
   return "data:image/svg+xml;utf8,"+encodeURIComponent(svg);
 }
 
-/* ---------- Retired: seed dresses + localStorage helpers ----------
-   The 8 hardcoded demo listings (Unsplash photos, fake 052… numbers,
-   a@x.com-style emails) and the `LS` get/set helpers that persisted them
-   under "onenight_dresses" both lived here.
+/* NO SEED DATA, NO LOCAL CACHE, NO OFFLINE FALLBACK. Dresses are read from
+   and written to Postgres through the API in lib/api.js, so an empty
+   catalogue means the database is genuinely empty — the truth we want,
+   rather than fake listings papering over it.
 
-   Both are gone. Dresses are read from and written to Postgres through the
-   API in lib/api.js — there is no seed set, no local cache, and no offline
-   fallback. An empty catalogue now means the database is genuinely empty,
-   which is the truth we want rather than eight fake dresses papering over
-   it. Stale copies left in existing browsers are cleared once by
-   purgeLegacyDressStorage() below.
-
-   `LS` is deliberately not re-exported even as a generic utility: keeping it
-   around invites exactly the pattern being removed. Components that need
-   local UI state use hooks/useLocalStorage.js, which is scoped to
-   preferences (favourites, the signed-in user) — never listing data. */
+   Do not add a generic localStorage helper here. Components that need local
+   UI state use hooks/useLocalStorage.js, which is scoped to preferences
+   (favourites, the signed-in user) — never listing data. */
 
 /** localStorage keys written by the old mock API. */
 const LEGACY_DRESS_KEYS = ["onenight_dresses", "onenight_users"];
